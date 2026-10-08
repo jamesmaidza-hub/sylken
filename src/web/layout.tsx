@@ -73,6 +73,11 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('click',e=>{const r=e.target.closest('tr[data-href]');if(r&&!e.target.closest('a,button,input'))location.href=r.dataset.href});
 `
 
+/** The nav entry with the longest href that prefixes the path, so /reports/minmax lights up Order, not Reports. */
+function current(path = '') {
+  return nav.map(([, , href]) => href).filter((h) => path.startsWith(h)).sort((a, b) => b.length - a.length)[0]
+}
+
 export function Layout(props: { title: string; user?: SessionUser | null; path?: string; children?: Child; flash?: { ok?: string; err?: string } }) {
   return (
     <html lang="en">
@@ -88,7 +93,7 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
             <a class="brand" href="/">sylken</a>
             <nav>
               {nav.map(([k, label, href]) => (
-                <a href={href} class={props.path?.startsWith(href) ? 'on' : ''}><kbd>{k}</kbd>{label}</a>
+                <a href={href} class={href === current(props.path) ? 'on' : ''}><kbd>{k}</kbd>{label}</a>
               ))}
             </nav>
             <span class="who">{props.user.tenantName} · {props.user.name} ({props.user.role}) · <a href="/logout">Log out</a></span>
