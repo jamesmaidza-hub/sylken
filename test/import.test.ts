@@ -71,7 +71,7 @@ describe('Compharm import (synthetic exports)', () => {
   it('cleans, converts packs to units and keeps what the shop set', async () => {
     const t = await newTenant(db)
     const f = await fixtures()
-    const report = await t.as((tx) => importCompharm(tx, f))
+    const report = await t.as((tx) => importCompharm(tx, { ...f, includeCatalogue: true }))
     expect(report.items).toBe(7)
     expect(report.quarantineReasons).toMatchObject({ 'no description': 1, 'cost looks wrong': 1, 'no cost': 1, 'no retail price': 1 })
     expect(report.issues.map((i) => i.issue)).toContain('in usage history but not in item list')
@@ -91,6 +91,14 @@ describe('Compharm import (synthetic exports)', () => {
     const ours = await t.as((tx) => minMaxOrderReport(tx))
     const cmp = compareMinMax(await readCompharmMinMax(f.minMax!), ours)
     expect(cmp).toMatchObject({ matched: 2, missing: [], extra: [], mismatches: [] })
+  })
+
+  it('by default skips catalogue lines that appear in no other export', async () => {
+    const t = await newTenant(db)
+    const report = await t.as(async (tx) => importCompharm(tx, await fixtures()))
+    expect(report.items).toBe(2)                       // the syrup and the tablets
+    expect(report.skippedCatalogue).toBe(5)
+    expect(await t.as((tx) => findByCode(tx, 'USER0002'))).toBeNull()
   })
 
   it('refuses to import into a tenant that already has items', async () => {
@@ -114,7 +122,8 @@ describe.runIf(real)('Compharm import (Friends Pharmacy exports)', () => {
       usage: join(seed!, 'Stock_Usage_History_All_08Oct26.xlsx'),
       salesCsv: join(seed!, 'Sales_Oct2025_All_Items.csv'),
     }))
-    expect(report.items).toBe(22682)
+    expect(report.items + report.skippedCatalogue).toBe(22682)
+    expect(report.items).toBeGreaterThan(6000)
     expect(report.minMaxLevels).toBe(1581)
     const ours = await t.as((tx) => minMaxOrderReport(tx))
     const cmp = compareMinMax(await readCompharmMinMax(join(seed!, 'MinMaxLevel_30Sep26.xlsx')), ours)

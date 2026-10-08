@@ -20,6 +20,8 @@ export interface CompharmFiles {
   minMax?: string
   usage?: string
   salesCsv?: string
+  /** Also import item-list lines that appear in no other export (the supplier catalogue). Off by default. */
+  includeCatalogue?: boolean
 }
 
 export interface ImportIssue {
@@ -30,6 +32,7 @@ export interface ImportIssue {
 
 export interface ImportReport {
   items: number
+  skippedCatalogue: number
   active: number
   dormant: number
   quarantined: number
@@ -65,6 +68,7 @@ interface Draft {
   minPacks: number | null
   maxPacks: number | null
   active: boolean
+  seen: boolean      // appears in the min/max, usage or sales export
 }
 
 export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<ImportReport> {
@@ -88,13 +92,14 @@ export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<Impo
       code, description: str(r['Item Description']).replace(/\s+/g, ' '),
       cost: money(numberOrNull(r['Cost']), 4), retail: money(numberOrNull(r['Retail'])) ?? 0,
       packSize: 1, packSizeKnown: false, schedule: null, bins: [], compharmStockId: null,
-      status: 'active', reason: null, openingPacks: null, openingAsOf: null, minPacks: null, maxPacks: null, active: false,
+      status: 'active', reason: null, openingPacks: null, openingAsOf: null, minPacks: null, maxPacks: null, active: false, seen: false,
     })
   }
 
   const fill = (code: string, r: { description?: string; packSize?: number | null; bins?: string[] }) => {
     const d = drafts.get(code)
     if (!d) return null
+    d.seen = true
     if (!d.description && r.description) d.description = r.description.replace(/\s+/g, ' ')
     if (r.packSize && !d.packSizeKnown && Number.isInteger(r.packSize) && r.packSize > 0) { d.packSize = r.packSize; d.packSizeKnown = true }
     if (r.bins && !d.bins.length) d.bins = r.bins.map((b) => b.toUpperCase()).filter(Boolean)
@@ -172,6 +177,7 @@ export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<Impo
   // 5. Decide each item's status. Quarantined items stay searchable but can't be sold until fixed.
   const quarantineReasons: Record<string, number> = {}
   for (const d of drafts.values()) {
+    if (!files.includeCatalogue && !d.seen) continue
     const reasons: string[] = []
     if (!d.description || PLACEHOLDER_DESC.test(d.description)) reasons.push('no description')
     else if (/^\d{6,}$/.test(d.description)) reasons.push('description is a barcode')
@@ -196,7 +202,10 @@ export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<Impo
   }
 
   // 6. Write items in batches
-  const list = [...drafts.values()]
+  // The item list holds Compharm's whole product file. By default only items the shop has
+  // stocked, sold or bought (they appear in another export) come in; new lines arrive on invoices.
+  const list = [...drafts.values()].filter((d) => files.includeCatalogue || d.seen)
+  const skippedCatalogue = drafts.size - list.length
   const idByCode = new Map<string, string>()
   for (let i = 0; i < list.length; i += 1000) {
     const chunk = list.slice(i, i + 1000).map((d) => ({
@@ -264,7 +273,8 @@ export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<Impo
   const priceRows: Record<string, unknown>[] = []
   for (const [code, months] of usage) {
     const d = drafts.get(code)!
-    const itemId = idByCode.get(code)!
+    const itemId = idByCode.get(code)
+    if (!itemId) continue
     for (const m of months) {
       const sold = Math.round(m.sold * d.packSize)
       const purchased = Math.round(m.purchased * d.packSize)
@@ -288,6 +298,7 @@ export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<Impo
 
   return {
     items: list.length,
+    skippedCatalogue,
     active: list.filter((d) => d.status === 'active').length,
     dormant: list.filter((d) => d.status === 'dormant').length,
     quarantined: list.filter((d) => d.status === 'quarantined').length,

@@ -22,11 +22,11 @@ Loaded with the Friends Pharmacy exports of 30 Sep and 8 Oct 2026:
 
 | | |
 |---|---|
-| Items imported | 22,682 in about 4 seconds |
-| Active / dormant / quarantined | 2,069 / 20,178 / 435 |
+| Items imported | 7,317 of the 22,682 in the item list: those that appear in the min/max, usage or sales exports. The other 15,365 are Compharm's product file and are skipped (`--all` brings them in) |
+| Active / dormant / quarantined | 2,069 / 5,157 / 91 |
 | Min/max order report | **1,581 of 1,581 lines match** Compharm's 30 Sep report, same items and same order quantities (run `npm run check:minmax`) |
 
-Dormant items are the catalogue lines with no stock, sales or purchases in the exports. They stay searchable but are kept out of counts and lists. Quarantined items came in with no description, no cost, no retail price, or an impossible cost (for example P13,387,138.67); they can't be sold until fixed.
+Dormant items appear in an export but had no stock, sales or purchases in the last year. They stay searchable but are kept out of counts and lists. Quarantined items came in with no description, no cost, no retail price, or an impossible cost (for example P13,387,138.67); they can't be sold until fixed.
 
 ## Stack, and why
 
@@ -60,7 +60,7 @@ npm run check:minmax -- --tenant friends --minmax MinMaxLevel_30Sep26.xlsx
 npm start                       # http://localhost:3000
 ```
 
-The import only runs into an empty pharmacy. `import-report.json` lists every item it quarantined or had questions about.
+The import only runs into an empty pharmacy, and by default skips item-list lines that appear in no other export; new items come in on supplier invoices. `import-report.json` lists every item it quarantined or had questions about.
 
 To deploy on a server: set `POSTGRES_PASSWORD`, `APP_DB_PASSWORD` and `DOMAIN`, then `docker compose up -d` and `docker compose run --rm app npm run migrate`.
 

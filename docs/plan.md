@@ -17,7 +17,8 @@ sylken can only replace Compharm once dispensing, stock, the till and BOMAid cla
 - **Append-only ledger**; corrections are new movements. Only deleting a whole pharmacy removes ledger rows.
 - **Negative stock is blocked by default** for sales, dispensing and adjustments; a pharmacist can override, and a setting allows it shop-wide. Offline till sales are always recorded, since they already happened.
 - **Opening stock** comes from Compharm's exports for now: the 30 Sep min/max report where it has the item, else the 8 Oct usage report. Before switchover it must come from a fresh stock take.
-- **Imported markups are kept per item** where they differ from the shop default (1,289 items at Friends), so re-pricing on receipt doesn't change them.
+- **Only items the shop has used are imported** (7,317 of 22,682); the rest of the item list is Compharm's product file. New items are added from supplier invoices.
+- **Imported markups are kept per item** where they differ from the shop default (837 of the imported items at Friends), so re-pricing on receipt doesn't change them.
 - **GP is shown on the price excluding VAT.** Compharm's GP % includes VAT in the price, so sylken's figures are lower for the same item.
 - **No licensed reference data ships with sylken.** Each pharmacy's own item list is imported into its own tenant.
 
