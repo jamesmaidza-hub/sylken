@@ -1,0 +1,34 @@
+{
+  "name": "sylken",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Pharmacy stock, till and dispensing system. Stage 1: items and stock.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "start": "tsx src/server.ts",
+    "migrate": "tsx src/cli/migrate.ts",
+    "tenant:create": "tsx src/cli/create-tenant.ts",
+    "import:compharm": "tsx src/cli/import-compharm.ts",
+    "check:minmax": "tsx src/cli/check-minmax.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@hono/node-server": "^2.1.4",
+    "csv-parse": "^7.0.3",
+    "exceljs": "^4.4.0",
+    "hono": "^4.12.0",
+    "postgres": "^3.4.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.20.5",
+    "tsx": "^4.23.15",
+    "typescript": "5.9",
+    "vitest": "^3.2.7"
+  }
+}

@@ -1,0 +1,28 @@
+# One small server runs everything: PostgreSQL, the app, and Caddy for HTTPS.
+# docker compose up -d, then: docker compose run --rm app npm run migrate
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: sylken
+    volumes: [pgdata:/var/lib/postgresql/data]
+  app:
+    build: .
+    restart: unless-stopped
+    depends_on: [db]
+    environment:
+      DATABASE_URL: postgres://sylken_app:${APP_DB_PASSWORD:?set APP_DB_PASSWORD}@db:5432/sylken
+      DATABASE_ADMIN_URL: postgres://postgres:${POSTGRES_PASSWORD}@db:5432/sylken
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD}
+      NODE_ENV: production
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    command: caddy reverse-proxy --from ${DOMAIN:?set DOMAIN} --to app:3000
+    volumes: [caddy:/data]
+volumes:
+  pgdata:
+  caddy:
