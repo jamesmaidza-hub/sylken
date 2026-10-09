@@ -87,6 +87,11 @@ tfoot td{font-variant-numeric:tabular-nums}
 .fd-tabs{display:flex;gap:4px;margin:14px 0 0;border-bottom:1px solid var(--line)}.fd-tabs button{background:none;color:var(--muted);border-radius:6px 6px 0 0;padding:8px 16px}
 .fd-tabs button.on{color:var(--ink);background:var(--bg);box-shadow:inset 0 -3px 0 var(--accent);font-weight:600}
 .fd-detail{min-height:130px;padding:12px 4px 0}
+.records{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px}.records thead th{position:sticky;top:0;background:var(--panel)}
+tr.cur{outline:2px solid var(--accent);outline-offset:-2px;background:color-mix(in srgb,var(--accent) 14%,transparent);font-weight:600}
+.tabs{display:flex;gap:4px;margin:16px 0 0;border-bottom:1px solid var(--line)}.tabs a{padding:9px 18px;border-radius:6px 6px 0 0;color:var(--muted);text-decoration:none;font-weight:500}
+.tabs a.on{color:var(--ink);background:var(--panel);box-shadow:inset 0 -3px 0 var(--accent);font-weight:600}section.tab{margin-top:8px}section.tab>.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
+.grid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}.items-form>.panel>.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
 @media (max-width:980px){.rx-desk{grid-template-columns:1fr}}
 @media (max-width:640px){.rx-l{width:100%}.rx-info{margin-left:0}}
 /* Touch screen layout: bigger rows, fields and buttons; screens may add big-button panels (.touch-only). */
