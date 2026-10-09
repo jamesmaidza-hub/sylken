@@ -66,4 +66,3 @@ button.secondary{background:var(--chip);color:var(--ink)}
   @page{margin:4mm}
 }
 @media (max-width:760px){main{grid-template-columns:1fr;padding:12px 16px}.keys{display:none}.due b{font-size:30px}}
-.rx{display:inline-block;background:var(--chip,#eef1f4);border-radius:8px;padding:0 6px;font-size:12px;font-weight:600}

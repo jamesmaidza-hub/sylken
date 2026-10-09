@@ -20,7 +20,6 @@ const nav: [string, string, string][] = [
   ['F2', 'Items', '/items'],
   ['F3', 'Receive', '/receiving'],
   ['F4', 'Stock take', '/stocktakes'],
-  ['F5', 'Dispensary', '/dispensary'],
   ['F6', 'Order (min/max)', '/reports/minmax'],
   ['F7', 'Reports', '/reports'],
   ['F8', 'Settings', '/settings'],
@@ -54,7 +53,7 @@ form.grid label,label.f{display:flex;flex-direction:column;gap:4px;font-size:12p
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.spacer{flex:1}
 .chip{display:inline-block;background:var(--chip);border-radius:10px;padding:0 8px;font-size:12px;margin:1px 2px 1px 0}
 .st-active{color:var(--good)}.st-dormant{color:var(--muted)}.st-quarantined{color:var(--bad)}.st-discontinued{color:var(--muted)}
-.msg{padding:8px 12px;border-radius:6px;margin-bottom:12px}.msg.err{background:color-mix(in srgb,var(--bad) 15%,transparent);color:var(--bad)}.msg.ok{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}.msg.warn{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn)}
+.msg{padding:8px 12px;border-radius:6px;margin-bottom:12px}.msg.err{background:color-mix(in srgb,var(--bad) 15%,transparent);color:var(--bad)}.msg.ok{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}
 .stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
 .stat b{display:block;font-size:22px}a.stat{text-decoration:none;color:inherit}a.stat:hover{border-color:var(--accent)}.stat span{color:var(--muted);font-size:12px}
 .muted{color:var(--muted)}.neg{color:var(--bad)}.pos{color:var(--good)}.hint{color:var(--muted);font-size:12px}
@@ -68,7 +67,7 @@ tfoot td{font-variant-numeric:tabular-nums}
 // Function keys work everywhere, like Compharm. "/" jumps to the search box, arrows move through result rows.
 const keys = `
 document.addEventListener('keydown',e=>{
-  const map={F2:'/items',F3:'/receiving',F4:'/stocktakes',F5:'/dispensary',F6:'/reports/minmax',F7:'/reports',F8:'/settings',F9:'/till/',F10:'/cashup'};
+  const map={F2:'/items',F3:'/receiving',F4:'/stocktakes',F6:'/reports/minmax',F7:'/reports',F8:'/settings',F9:'/till/',F10:'/cashup'};
   if(map[e.key]){e.preventDefault();location.href=map[e.key];return}
   const t=e.target, typing=t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT');
   if(e.key==='/'&&!typing){const s=document.querySelector('[data-search]');if(s){e.preventDefault();s.focus();s.select()}return}

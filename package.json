@@ -2,7 +2,7 @@
   "name": "sylken",
   "version": "0.1.0",
   "private": true,
-  "description": "Pharmacy stock, till and dispensing system. Stage 1: items and stock. Stage 2: till and cash-up. Stage 3: dispensing.",
+  "description": "Pharmacy stock, till and dispensing system. Stage 1: items and stock. Stage 2: till and cash-up.",
   "type": "module",
   "engines": {
     "node": ">=22"
