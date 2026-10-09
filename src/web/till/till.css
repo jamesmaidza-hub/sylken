@@ -106,3 +106,5 @@ body.touch-mode .due b{font-size:40px}
 .pad button.bad{background:var(--bad);color:#fff;border-color:var(--bad)}
 .pad button.pay{grid-column:4;background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-size:26px}
 @media (max-width:900px){body.touch-mode main{grid-template-columns:1fr}}
+header a.nav{color:var(--ink);text-decoration:none;padding:5px 10px;border-radius:6px;background:var(--chip);font-size:14px}
+header a.nav:hover{background:color-mix(in srgb,var(--accent) 18%,var(--chip))}

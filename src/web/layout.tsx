@@ -17,7 +17,7 @@ export const dateTime = (d: Date | string | null | undefined) =>
   d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
 
 const nav: [string, string, string][] = [
-  ['F2', 'Items', '/items'],
+  ['F2', 'Stock', '/items'],
   ['F3', 'Receive', '/receiving'],
   ['F4', 'Stock take', '/stocktakes'],
   ['F5', 'Dispensary', '/dispensary'],

@@ -54,6 +54,9 @@ function tillPage(c: Ctx) {
             <span id="run-label" class="muted"></span>
             <span id="cashier" class="muted"></span>
             <span class="spacer"></span>
+            <a class="nav" href="/items" title="Items and stock on hand (F2 in the back office)">Stock</a>
+            <a class="nav" href="/dispensary">Dispensary</a>
+            <a class="nav" href="/" title="Receiving, min/max ordering, reports, cash-up">Back office</a>
             <span id="net" class="net">…</span>
             <span id="pending" class="muted"></span>
             <button id="touch-toggle" type="button" class="secondary small" title="Switch between the keyboard layout and big buttons for a touch screen">Touch screen</button>
