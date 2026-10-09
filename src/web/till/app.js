@@ -694,7 +694,7 @@
   }
 
   $('touch-toggle').addEventListener('click', () => setTouch(!touch))
-  $('quick').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (b) quickSale(Number(b.dataset.q)) })
+  $('quick').addEventListener('click', async (e) => { const b = e.target.closest('[data-q]'); if (b) { await quickSale(Number(b.dataset.q)); $('scan').focus({ preventScroll: true }) } })
   document.querySelector('.pad').addEventListener('click', (e) => {
     const b = e.target.closest('button')
     if (!b || modalDone) return
@@ -705,6 +705,7 @@
     else if (k) scan.value += k
     const actions = { qty: setQtyFromPad, price: changePrice, void: removeLine, voidall: clearSale, script: addScript, refund: toggleRefund, reprint: printSlip, pay }
     if (b.dataset.a) actions[b.dataset.a]()
+    if (!modalDone) scan.focus({ preventScroll: true })   // a scanner always types into the sale
   })
 
   // ------------------------------------------------------------ keys
