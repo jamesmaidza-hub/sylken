@@ -8,7 +8,7 @@ import { rangeFrom, RangeForm } from './cashup.js'
 import { back, page, requireRole, run, type Env } from './app.js'
 import { dateTime, money, qty } from './layout.js'
 
-const csv = (rows: (string | number | null)[][]) =>
+export const csv = (rows: (string | number | null)[][]) =>
   rows.map((r) => r.map((v) => (v === null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v))).join(',')).join('\n')
 
 export function reportRoutes() {

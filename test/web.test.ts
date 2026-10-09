@@ -33,7 +33,9 @@ describe('web', () => {
     for (const p of ['/', '/items', '/items/new', '/receiving', '/stocktakes', '/reports', '/reports/minmax', '/reports/minmax/suggest',
       '/reports/valuation', '/reports/negative', '/reports/dormant', '/reports/adjustments', '/reports/gp', '/reports/quarantine', '/settings',
       '/till/', '/till/app.js', '/till/sw.js', '/cashup', '/cashup/problems', '/sales', '/accounts', '/accounts/aging', '/reports/sales', '/reports/sales-gp',
-      '/reports/sales?format=csv', '/reports/sales-gp?format=csv']) {
+      '/reports/sales?format=csv', '/reports/sales-gp?format=csv', '/dispensary', '/dispensary?q=smith', '/dispensary/patients/new',
+      '/dispensary/scripts', '/dispensary/scripts?format=csv', '/dispensary/owed', '/dispensary/register', '/dispensary/register?format=csv',
+      '/dispensary/doctors', '/dispensary/settings']) {
       const res = await get(p)
       expect(res.status, p).toBe(200)
     }
@@ -93,5 +95,43 @@ describe('web', () => {
     const after = await send()
     expect(after.runs[runId].status).toBe('closed')
     expect(await (await get('/cashup/problems')).text()).toContain('not-a-uuid')
+  })
+
+  it('dispenses a script on screen, prints its labels and finds it from the till', async () => {
+    const { t, get, post } = await loggedIn()
+    const loc = (res: Response) => new URL(res.headers.get('location')!, 'http://x')
+    await t.as((tx) => createItem(tx, { stockCode: 'AMX500', description: 'AMOXICILLIN 500MG CAPS', packSize: 15, sellLoose: true, costPerPack: 30 }))
+    await t.as(async (tx) => {
+      const [i] = await tx`select id from items where stock_code = 'AMX500'`
+      await tx`insert into stock_movements (tenant_id, item_id, kind, qty_units) values (${t.id}, ${i.id}, 'opening', 60)`
+    })
+    expect(loc(await post('/dispensary/settings', { fee: '10', supplyDays: '30', repeatDays: '180', schedules: '2, 3', nextNo: '61370',
+      labelW: '70', labelH: '36', labelFooter: 'Keep out of reach of children', address: 'Main Mall, Gaborone', phone: '391 0000' })).searchParams.get('ok')).toBe('Settings saved')
+    await post('/dispensary/settings/aids', { name: 'BOMAid', code: 'BOM' })
+    await post('/dispensary/doctors', { surname: 'Molefe', initials: 'K', title: 'Dr', practiceNo: 'P-1', phone: '' })
+    const html = await (await get('/dispensary/patients/new')).text()
+    const aidId = html.match(/<option value="([0-9a-f-]{36})">BOMAid/)![1]
+    const created = await post('/dispensary/patients', { surname: 'Mothibi', firstNames: 'Kagiso', medicalAidId: aidId, memberNo: '12345', sex: 'F' })
+    const patientPath = loc(created).pathname
+    const docId = (await (await get(patientPath)).text()).match(/<option value="([0-9a-f-]{36})">Dr K Molefe/)![1]
+    const draft = await post(`${patientPath}/scripts`, { doctorId: docId, rxDate: new Date().toISOString().slice(0, 10) })
+    const scriptPath = loc(draft).pathname
+    expect(loc(await post(`${scriptPath}/lines`, { item: 'amoxicillin', qty: '2', per: 'packs', supply: '', directions: '1c3d', supplyDays: '10', repeats: '1', icd10: 'j06.9' })).pathname).toBe(scriptPath)
+    const page = await (await get(scriptPath)).text()
+    expect(page).toContain('Take ONE capsule THREE times a day')
+    expect(page).toContain('J06.9')
+    const done = await post(`${scriptPath}/dispense`, {})
+    expect(loc(done).searchParams.get('ok')).toMatch(/script 61370/)
+    const labels = await (await get(`${scriptPath}/labels`)).text()
+    expect(labels).toContain('KAGISO MOTHIBI')
+    expect(labels).toContain('Main Mall, Gaborone')
+    expect(labels).toContain('size:70mm 36mm')
+    const till = await (await get('/api/till/scripts/61370')).json() as any
+    expect(till).toMatchObject({ scriptNo: 61370, medicalAid: 'BOMAid', memberNo: '12345/00', status: 'dispensed', paid: 0 })
+    expect(till.lines[0]).toMatchObject({ qtyUnits: 30 })
+    expect((await get('/api/till/scripts/99999')).status).toBe(404)
+    expect(loc(await get('/dispensary/scripts?no=61370')).pathname).toBe(scriptPath)
+    expect(await (await get(`/dispensary/scripts?from=2000-01-01&to=2100-01-01`)).text()).toContain('KAGISO MOTHIBI')
+    expect(loc(await post(`${scriptPath}/repeat`, {})).pathname).toMatch(/^\/dispensary\/scripts\//)
   })
 })

@@ -4,6 +4,7 @@ import { DomainError } from '../domain/errors.js'
 import { findByCode, searchItems } from '../domain/items.js'
 import { getSettings } from '../domain/settings.js'
 import { postMovements } from '../domain/stock.js'
+import { scriptForTill } from '../domain/scripts.js'
 import { applyTillOps, drawerTenders, tenders, touchTill } from '../domain/till.js'
 import { run, type Env } from './app.js'
 
@@ -30,8 +31,9 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('sale'), userId: z.string().uuid().nullish(), data: z.object({
     id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['sale', 'refund']), refundOf: z.string().uuid().nullish(),
     occurredAt: when, accountId: z.string().uuid().nullish(), medicalAid: z.string().max(80).nullish(), memberNo: z.string().max(40).nullish(),
-    cashTendered: money.nullish(), rounding: money.nullish(),
-    lines: z.array(z.object({ itemId: z.string().uuid(), qtyUnits: z.number().int(), listTotal: money, lineTotal: money })).max(500),
+    cashTendered: money.nullish(), rounding: money.nullish(), scriptId: z.string().uuid().nullish(),
+    lines: z.array(z.object({ itemId: z.string().uuid(), qtyUnits: z.number().int(), listTotal: money, lineTotal: money,
+      scriptLineId: z.string().uuid().nullish() })).max(500),
     payments: z.array(z.object({ tender: z.enum(tenders), amount: money, reference: z.string().max(60).nullish() })).max(10),
   }) }),
   z.object({ type: z.literal('till_entry'), userId: z.string().uuid().nullish(), data: z.object({
@@ -99,6 +101,13 @@ export function api() {
       }
     })
     return c.json(data)
+  })
+
+  /** A dispensed script, found by its number, so the till can take payment for it. Needs the server. */
+  r.get('/till/scripts/:no', async (c) => {
+    const no = Number(c.req.param('no'))
+    const script = Number.isInteger(no) ? await run(c, (tx) => scriptForTill(tx, no)) : null
+    return script ? c.json(script) : c.json({ error: `no script number ${c.req.param('no')}` }, 404)
   })
 
   /**

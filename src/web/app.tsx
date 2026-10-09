@@ -15,6 +15,7 @@ import { accountRoutes } from './accounts.js'
 import { cashupRoutes } from './cashup.js'
 import { salesRoutes } from './sales.js'
 import { tillRoutes } from './till.js'
+import { dispensaryRoutes } from './dispensary.js'
 import * as reports from '../domain/reports.js'
 import { money } from './layout.js'
 
@@ -138,6 +139,7 @@ export function createApp(db: Sql) {
   app.route('/cashup', cashupRoutes())
   app.route('/sales', salesRoutes())
   app.route('/accounts', accountRoutes())
+  app.route('/dispensary', dispensaryRoutes())
   app.route('/', tillRoutes())
   app.route('/api', api())
 
