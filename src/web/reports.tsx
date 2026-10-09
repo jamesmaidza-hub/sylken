@@ -183,7 +183,8 @@ export function reportRoutes() {
           <tfoot><tr><td><b>Total</b></td><td class="n">{t.sales}</td><td class="n">{t.refunds || ''}</td><td class="n"><b>{money(t.total)}</b></td><td class="n">{money(t.vat)}</td>
             <td class="n">{money(t.excl)}</td><td class="n">{money(t.cost)}</td><td class="n"><b>{money(t.gp)}</b></td><td class="n">{t.gpPct === null ? '' : `${t.gpPct.toFixed(1)}%`}</td></tr></tfoot>
         </table></div>
-        <p class="hint">GP is on the price excluding VAT, at each item's average cost when it was sold.</p>
+        <p class="hint">GP is on the price excluding VAT, at each item's average cost when it was sold.
+          {t.rounding !== 0 && ` Cash rounding to the nearest 5 thebe came to ${money(t.rounding)} over these days; it is in the tenders but not in sales or VAT.`}</p>
         <div class="blocks">
           <div class="block"><h3>By tender</h3><table class="sumtab">{d.byTender.map((x) => <tr><td>{tenderLabels[x.tender as Tender] ?? x.tender}</td><td class="n">{money(x.amount)}</td></tr>)}</table></div>
           <div class="block"><h3>By assistant</h3><table class="sumtab">{d.byAssistant.map((x) => <tr><td>{x.name} <span class="muted">({x.sales})</span></td><td class="n">{money(x.total)}</td></tr>)}</table></div>

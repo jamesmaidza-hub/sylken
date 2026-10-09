@@ -31,6 +31,10 @@ sylken can only replace Compharm once dispensing, stock, the till and BOMAid cla
 - **Late sales** (reaching the server after their run is cashed up) are kept, flagged and shown on the run, so a till that was offline at closing shows up as a difference rather than vanishing.
 - **Sales summary** follows POSWin's layout: "cash sales" means everything paid at the till (cash, card, cheque, EFT), and runs are picked by the day they opened.
 - **Medical aid at the till** is recorded as a tender with the scheme and member number. Claims come in stage 4.
+- **Cash is rounded to 5 thebe** (james, 9 Oct 2026). Only the cash that settles a sale is rounded; the rounding is kept beside the sale, so sales and VAT stay exact and the drawer count matches. The step is a setting.
+- **Till slips show the VAT included** (what james said BURS needs), with the shop's VAT number from Settings.
+- **One till** at Friends for now (T1 is created for every pharmacy); more can be added under Cash-up.
+- **Credit limits**: Friends has no customer accounts yet but will use them with limits. The till refuses an account sale that would take the customer over the limit, using the balance from its last item-list refresh plus what it has rung up since. A sale that arrives from an offline till is still recorded.
 - **Line prices** are the units as a fraction of the pack price, so whole packs are exact. A changed price keeps the list price beside it, and the GP report shows discounts given.
 
 ## Decisions taken in stage 3
@@ -54,13 +58,9 @@ sylken can only replace Compharm once dispensing, stock, the till and BOMAid cla
 2. The Oct 2025 sales file and the usage history don't reconcile; which scope does each cover? Stage 1 uses the usage history for min/max suggestions and the sales file only for pack size, bin and schedule.
 3. Can Compharm give a database export? Suppliers, departments, VAT per item and patients aren't in the reports.
 4. Which suppliers does the shop order from, and do any accept electronic orders?
-5. Does the shop round cash to 5 or 10 thebe at the till? sylken charges to the thebe for now.
-6. What must a till slip show to count as a VAT invoice for BURS? sylken prints the shop name, VAT number (set in Settings), date, items, total incl VAT and tenders.
-7. How many tills, and which slip printers and card machines? The card machine isn't linked; its batch total is entered at cash-up.
-8. Is direct banking (EFT) used at Friends, and are account customers given credit limits?
-9. ~~Which schedules go in the register?~~ **Answered 9 Oct 2026: schedule 1** (set in Dispensing settings for Friends). Still to confirm: what each register entry must show by law; sylken records date, script number, patient name, ID and address, doctor and practice number, quantity in and out, running balance and who dispensed.
-10. ~~What dispensing fee does the shop charge?~~ **Answered 9 Oct 2026: none.** The fee stays at P0; the setting is there for other pharmacies.
-11. ~~How long are repeats valid?~~ **Answered 9 Oct 2026: 180 days** from the script date, which is the default.
-12. What must a dispensing label show by law? Not known yet. The size is **answered 9 Oct 2026: 59 × 46 mm**. sylken prints the shop, patient, item, quantity, directions, date, script number, doctor and dispenser.
-13. Should a script be priced from the shop's retail price, or from a separate dispensing price (cost plus a markup and fee)? sylken uses retail plus fee for now; stage 4 adds medical aid fee models.
-14. Can Compharm's patients, doctors and script history come across in a database export?
+5. ~~Which schedules go in the register?~~ **Answered 9 Oct 2026: schedule 1** (set in Dispensing settings for Friends). Still to confirm: what each register entry must show by law; sylken records date, script number, patient name, ID and address, doctor and practice number, quantity in and out, running balance and who dispensed.
+6. ~~What dispensing fee does the shop charge?~~ **Answered 9 Oct 2026: none.** The fee stays at P0; the setting is there for other pharmacies.
+7. ~~How long are repeats valid?~~ **Answered 9 Oct 2026: 180 days** from the script date, which is the default.
+8. What must a dispensing label show by law? Not known yet. The size is **answered 9 Oct 2026: 59 × 46 mm**. sylken prints the shop, patient, item, quantity, directions, date, script number, doctor and dispenser.
+9. Should a script be priced from the shop's retail price, or from a separate dispensing price (cost plus a markup and fee)? sylken uses retail plus fee for now; stage 4 adds medical aid fee models.
+10. Can Compharm's patients, doctors and script history come across in a database export?

@@ -6,7 +6,7 @@ import { createItem, getItem } from '../src/domain/items.js'
 import { dailySales, itemGp, salesSummary, shopToday } from '../src/domain/sales.js'
 import { postMovements } from '../src/domain/stock.js'
 import {
-  applyTillOps, closeRun, getSale, linePrice, listTills, openRun, recordSale, recordTillEntry, runSummary, vatIn,
+  applyTillOps, closeRun, getSale, linePrice, listTills, roundCash, openRun, recordSale, recordTillEntry, runSummary, vatIn,
   type SaleInput,
 } from '../src/domain/till.js'
 import { purgeTenant } from '../src/domain/tenants.js'
@@ -49,6 +49,14 @@ describe('till pricing', () => {
     expect(linePrice(50, 100, 30)).toBe(15)
     expect(vatIn(114, 0.14)).toBe(14)
   })
+
+  it('rounds cash to the nearest 5 thebe', () => {
+    expect(roundCash(15.69, 0.05)).toBe(15.7)
+    expect(roundCash(15.67, 0.05)).toBe(15.65)
+    expect(roundCash(15.625, 0.05)).toBe(15.65)
+    expect(roundCash(-15.69, 0.05)).toBe(-15.7)
+    expect(roundCash(15.69, 0.01)).toBe(15.69)
+  })
 })
 
 describe('sales', () => {
@@ -84,6 +92,19 @@ describe('sales', () => {
     const run = await newRun()
     await t.as((tx) => recordSale(tx, sale(run, [{ itemId: i.id, qtyUnits: 150, listTotal: 513, lineTotal: 513 }], [{ tender: 'card', amount: 513 }])))
     expect((await t.as((tx) => getItem(tx, i.id)))!.onHandUnits).toBe(-50)
+  })
+
+  it('takes cash rounded to 5 thebe and keeps the rounding apart from the sale', async () => {
+    const i = await item('S-R', { costPerPack: 9.18 })              // retail 15.70 a pack: sell 7 units for 10.99
+    const run = await newRun(0)
+    const line = { itemId: i.id, qtyUnits: 7, listTotal: 10.99, lineTotal: 10.99 }
+    const s = sale(run, [line], [{ tender: 'cash', amount: 11 }], { rounding: 0.01, cashTendered: 20 })
+    await t.as((tx) => recordSale(tx, s))
+    const got = (await t.as((tx) => getSale(tx, s.id)))!
+    expect([got.total, got.rounding, got.change]).toEqual([10.99, 0.01, 9])
+    expect((await t.as((tx) => runSummary(tx, run)))!.expected.cash).toBe(11)
+    await expect(t.as((tx) => recordSale(tx, sale(run, [line], [{ tender: 'card', amount: 11 }], { rounding: 0.01 })))).rejects.toThrow(/only a cash payment/)
+    await expect(t.as((tx) => recordSale(tx, sale(run, [line], [{ tender: 'cash', amount: 11.1 }], { rounding: 0.11 })))).rejects.toThrow(/more than half/)
   })
 
   it('never lets a sale be edited or deleted', async () => {

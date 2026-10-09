@@ -698,7 +698,7 @@ export async function scriptForTill(tx: Tx, scriptNo: number) {
     medicalAid: s.medicalAidName, memberNo: s.memberNo ? `${s.memberNo}${s.dependantCode ? '/' + s.dependantCode : ''}` : null,
     total: s.total, claimTotal: s.claimTotal, patientTotal: s.patientTotal, paid: s.paid,
     lines: s.lines.map((l) => ({ scriptLineId: l.id, itemId: l.itemId, stockCode: l.stockCode, description: l.description, packSize: l.packSize,
-      qtyUnits: l.qtyUnits, lineTotal: l.lineTotal })),
+      qtyUnits: l.qtyUnits, lineTotal: l.lineTotal, vat: l.vat })),
   }
 }
 

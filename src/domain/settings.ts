@@ -22,6 +22,7 @@ export interface Settings {
   labelWidthMm: number
   labelHeightMm: number
   labelFooter: string | null
+  cashRounding: number
 }
 
 export async function getSettings(tx: Tx): Promise<Settings> {
@@ -47,6 +48,7 @@ export async function getSettings(tx: Tx): Promise<Settings> {
     labelWidthMm: s.label_width_mm,
     labelHeightMm: s.label_height_mm,
     labelFooter: s.label_footer,
+    cashRounding: num(s.cash_rounding),
   }
 }
 
@@ -70,6 +72,7 @@ const columns: Record<keyof Settings, string> = {
   labelWidthMm: 'label_width_mm',
   labelHeightMm: 'label_height_mm',
   labelFooter: 'label_footer',
+  cashRounding: 'cash_rounding',
 }
 
 export async function updateSettings(tx: Tx, patch: Partial<Settings>, userId?: string) {

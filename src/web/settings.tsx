@@ -20,6 +20,7 @@ export function settingsRoutes() {
           <label>Months of sales used for usage<input name="usageMonths" type="number" min="1" max="24" value={s.minmaxUsageMonths} /></label>
           <label>Highest believable cost per pack (P)<input name="maxSaneCost" type="number" min="1" value={s.maxSaneCost} /></label>
           <label>Till float to start a run (P)<input name="defaultFloat" type="number" step="0.01" min="0" value={s.defaultFloat.toFixed(2)} /></label>
+          <label>Round cash to (P)<input name="cashRounding" type="number" step="0.01" min="0.01" value={s.cashRounding.toFixed(2)} /></label>
           <label>VAT number (printed on till slips)<input name="vatNumber" value={s.vatNumber ?? ''} /></label>
           <label>Till slip footer<input name="receiptFooter" value={s.receiptFooter ?? ''} placeholder="Thank you. Get well soon." /></label>
           <label class="row" style="flex-direction:row"><input type="checkbox" name="allowNegative" checked={s.allowNegativeStock} /> Allow stock to go negative</label>
@@ -50,6 +51,7 @@ export function settingsRoutes() {
       maxSaneCost: Number(b.maxSaneCost),
       allowNegativeStock: b.allowNegative === 'on',
       defaultFloat: Number(b.defaultFloat || 0),
+      cashRounding: Number(b.cashRounding || 0.01),
       vatNumber: String(b.vatNumber ?? '').trim() || null,
       receiptFooter: String(b.receiptFooter ?? '').trim() || null,
     }, c.get('user').userId))

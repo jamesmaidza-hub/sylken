@@ -26,6 +26,12 @@ export function linePrice(retailPerPack: number, packSize: number, units: number
   return round2((units / packSize) * retailPerPack)
 }
 
+/** Round a cash amount to the nearest step (Botswana has no coin below 5 thebe). Halves round away from zero. */
+export function roundCash(amount: number, step: number): number {
+  if (!(step > 0.01)) return round2(amount)
+  return round2(Math.sign(amount) * Math.round(Math.abs(amount) / step + 1e-9) * step)
+}
+
 /** VAT contained in a VAT-inclusive amount. */
 export function vatIn(amountIncl: number, rate: number): number {
   return round2((amountIncl * rate) / (1 + rate))
@@ -119,6 +125,7 @@ export interface SaleInput {
   memberNo?: string | null
   cashTendered?: number | null
   scriptId?: string | null     // paying for a dispensed script
+  rounding?: number | null    // cash rounding taken on the sale: payments = lines + rounding
   lines: SaleLineInput[]
   payments: PaymentInput[]
 }
@@ -142,8 +149,16 @@ export async function recordSale(tx: Tx, s: SaleInput, opts: { userId?: string |
     if (!Number.isFinite(l.lineTotal) || l.lineTotal * sign < 0) throw new DomainError('line amounts must have the same sign as the sale')
   }
   const total = round2(s.lines.reduce((a, l) => a + round2(l.lineTotal), 0))
+  const rounding = round2(s.rounding ?? 0)
   const paid = round2(s.payments.reduce((a, p) => a + round2(p.amount), 0))
-  if (cents(paid) !== cents(total)) throw new DomainError(`payments (P${paid.toFixed(2)}) don't add up to the sale (P${total.toFixed(2)})`)
+  if (cents(paid) !== cents(total + rounding)) {
+    throw new DomainError(`payments (P${paid.toFixed(2)}) don't add up to the sale (P${round2(total + rounding).toFixed(2)})`)
+  }
+  if (rounding !== 0) {
+    const { cashRounding } = await getSettings(tx)
+    if (!s.payments.some((p) => p.tender === 'cash')) throw new DomainError('only a cash payment can be rounded')
+    if (cents(Math.abs(rounding)) * 2 > cents(cashRounding)) throw new DomainError(`cash rounding of P${rounding.toFixed(2)} is more than half of P${cashRounding.toFixed(2)}`)
+  }
   for (const p of s.payments) {
     if (!tenders.includes(p.tender)) throw new DomainError(`unknown tender ${p.tender}`)
     if (!Number.isFinite(p.amount) || p.amount === 0 || Math.sign(p.amount) !== sign) throw new DomainError('payment amounts must have the same sign as the sale')
@@ -205,10 +220,10 @@ export async function recordSale(tx: Tx, s: SaleInput, opts: { userId?: string |
 
   await tx`
     insert into sales (id, tenant_id, sale_no, till_run_id, kind, refund_of, occurred_at, user_id, account_id, medical_aid, member_no,
-                       total, vat, cost, cash_tendered, change_given, late, script_id)
+                       total, rounding, vat, cost, cash_tendered, change_given, late, script_id)
     values (${s.id}, current_setting('app.tenant_id')::uuid, ${saleNo}, ${s.runId}, ${s.kind}, ${s.refundOf ?? null}, ${s.occurredAt},
             ${opts.userId ?? null}, ${s.accountId ?? null}, ${s.medicalAid?.trim() || null}, ${s.memberNo?.trim() || null},
-            ${total}, ${vat}, ${Math.round(cost * 10000) / 10000}, ${cashTendered}, ${change}, ${late}, ${s.scriptId ?? null})`
+            ${total}, ${rounding}, ${vat}, ${Math.round(cost * 10000) / 10000}, ${cashTendered}, ${change}, ${late}, ${s.scriptId ?? null})`
   for (const l of lines) {
     await tx`
       insert into sale_lines (tenant_id, sale_id, line_no, item_id, qty_units, list_total, line_total, vat_rate, line_vat, unit_cost, script_line_id)
@@ -252,7 +267,7 @@ export async function getSale(tx: Tx, id: string) {
     runNo: s.run_no as number, tillCode: s.till_code as string, occurredAt: s.occurred_at as Date, userName: s.user_name as string | null,
     accountName: s.account_name as string | null, accountNo: s.account_no as string | null,
     medicalAid: s.medical_aid as string | null, memberNo: s.member_no as string | null,
-    total: num(s.total), vat: num(s.vat), cost: num(s.cost), cashTendered: numOrNull(s.cash_tendered), change: numOrNull(s.change_given),
+    total: num(s.total), rounding: num(s.rounding), vat: num(s.vat), cost: num(s.cost), cashTendered: numOrNull(s.cash_tendered), change: numOrNull(s.change_given),
     late: s.late as boolean,
     lines: lines.map((l) => ({
       lineNo: l.line_no as number, itemId: l.item_id as string, stockCode: l.stock_code as string, description: l.description as string,
@@ -330,7 +345,7 @@ export interface RunSummary {
   openingFloat: number
   floatKept: number | null
   note: string | null
-  sales: { count: number; refunds: number; total: number; vat: number; cost: number; firstAt: Date | null; lastAt: Date | null }
+  sales: { count: number; refunds: number; total: number; rounding: number; vat: number; cost: number; firstAt: Date | null; lastAt: Date | null }
   byTender: Record<Tender, number>          // sales less refunds, per tender
   accountPayments: Record<DrawerTender, number>
   pettyCash: number
@@ -350,7 +365,7 @@ export async function runSummary(tx: Tx, runId: string): Promise<RunSummary | nu
   if (!r) return null
   const [s] = await tx`
     select count(*) filter (where kind = 'sale')::int as sales, count(*) filter (where kind = 'refund')::int as refunds,
-           coalesce(sum(total), 0) as total, coalesce(sum(vat), 0) as vat, coalesce(sum(cost), 0) as cost,
+           coalesce(sum(total), 0) as total, coalesce(sum(rounding), 0) as rounding, coalesce(sum(vat), 0) as vat, coalesce(sum(cost), 0) as cost,
            min(occurred_at) as first_at, max(occurred_at) as last_at,
            count(*) filter (where late)::int as late_count, coalesce(sum(total) filter (where late), 0) as late_total
       from sales where till_run_id = ${runId}`
@@ -391,7 +406,7 @@ export async function runSummary(tx: Tx, runId: string): Promise<RunSummary | nu
     id: r.id, runNo: r.run_no, tillId: r.till_id, tillCode: r.till_code, tillName: r.till_name, status: r.status,
     openedAt: r.opened_at, openedBy: r.opened_by_name, closedAt: r.closed_at, closedBy: r.closed_by_name,
     openingFloat, floatKept: numOrNull(r.float_kept), note: r.note,
-    sales: { count: s.sales, refunds: s.refunds, total: num(s.total), vat: num(s.vat), cost: num(s.cost), firstAt: s.first_at, lastAt: s.last_at },
+    sales: { count: s.sales, refunds: s.refunds, total: num(s.total), rounding: num(s.rounding), vat: num(s.vat), cost: num(s.cost), firstAt: s.first_at, lastAt: s.last_at },
     byTender, accountPayments, pettyCash, expected, counts: countRows,
     surplus: r.status === 'closed' ? round2(countRows.reduce((a, c) => a + c.surplus, 0)) : null,
     late: { count: (s.late_count as number) + lateEntries, total: num(s.late_total) },
