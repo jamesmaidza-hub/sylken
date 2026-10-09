@@ -4,7 +4,7 @@ import type { SessionUser } from '../domain/auth.js'
 import { formatPacks } from '../domain/units.js'
 
 export const money = (n: number | null | undefined) =>
-  n === null || n === undefined ? '' : `P${n.toLocaleString('en-BW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+  n === null || n === undefined ? '' : `${n < 0 ? '-' : ''}P${Math.abs(n).toLocaleString('en-BW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 
 export const pct = (n: number | null | undefined) => (n === null || n === undefined ? '' : `${n.toFixed(1)}%`)
 
@@ -23,6 +23,10 @@ const nav: [string, string, string][] = [
   ['F6', 'Order (min/max)', '/reports/minmax'],
   ['F7', 'Reports', '/reports'],
   ['F8', 'Settings', '/settings'],
+  ['F9', 'Till', '/till/'],
+  ['F10', 'Cash-up', '/cashup'],
+  ['', 'Sales', '/sales'],
+  ['', 'Accounts', '/accounts'],
 ]
 
 const css = `
@@ -52,14 +56,18 @@ form.grid label,label.f{display:flex;flex-direction:column;gap:4px;font-size:12p
 .msg{padding:8px 12px;border-radius:6px;margin-bottom:12px}.msg.err{background:color-mix(in srgb,var(--bad) 15%,transparent);color:var(--bad)}.msg.ok{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}
 .stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
 .stat b{display:block;font-size:22px}a.stat{text-decoration:none;color:inherit}a.stat:hover{border-color:var(--accent)}.stat span{color:var(--muted);font-size:12px}
-.muted{color:var(--muted)}.neg{color:var(--bad)}.hint{color:var(--muted);font-size:12px}
+.muted{color:var(--muted)}.neg{color:var(--bad)}.pos{color:var(--good)}.hint{color:var(--muted);font-size:12px}
+.blocks{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px}
+.block{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px}.block h3{font-size:15px;margin:0 0 6px}
+table.sumtab{background:none;margin-top:6px}table.sumtab td{border:0;padding:2px 0}table.sumtab tr.t td{border-top:1px solid var(--line)}
+tfoot td{font-variant-numeric:tabular-nums}
 @media (max-width:640px){main{padding:12px 16px}header{gap:8px}header .who{margin-left:0}}
 `
 
 // Function keys work everywhere, like Compharm. "/" jumps to the search box, arrows move through result rows.
 const keys = `
 document.addEventListener('keydown',e=>{
-  const map={F2:'/items',F3:'/receiving',F4:'/stocktakes',F6:'/reports/minmax',F7:'/reports',F8:'/settings'};
+  const map={F2:'/items',F3:'/receiving',F4:'/stocktakes',F6:'/reports/minmax',F7:'/reports',F8:'/settings',F9:'/till/',F10:'/cashup'};
   if(map[e.key]){e.preventDefault();location.href=map[e.key];return}
   const t=e.target, typing=t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT');
   if(e.key==='/'&&!typing){const s=document.querySelector('[data-search]');if(s){e.preventDefault();s.focus();s.select()}return}
@@ -93,7 +101,7 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
             <a class="brand" href="/">sylken</a>
             <nav>
               {nav.map(([k, label, href]) => (
-                <a href={href} class={href === current(props.path) ? 'on' : ''}><kbd>{k}</kbd>{label}</a>
+                <a href={href} class={href === current(props.path) ? 'on' : ''}>{k && <kbd>{k}</kbd>}{label}</a>
               ))}
             </nav>
             <span class="who">{props.user.tenantName} · {props.user.name} ({props.user.role}) · <a href="/logout">Log out</a></span>

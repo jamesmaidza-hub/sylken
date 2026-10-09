@@ -10,6 +10,10 @@ export interface Settings {
   minmaxMaxDays: number
   minmaxUsageMonths: number
   maxSaneCost: number
+  defaultFloat: number
+  vatNumber: string | null
+  receiptFooter: string | null
+  timezone: string
 }
 
 export async function getSettings(tx: Tx): Promise<Settings> {
@@ -24,6 +28,10 @@ export async function getSettings(tx: Tx): Promise<Settings> {
     minmaxMaxDays: s.minmax_max_days,
     minmaxUsageMonths: s.minmax_usage_months,
     maxSaneCost: num(s.max_sane_cost),
+    defaultFloat: num(s.default_float),
+    vatNumber: s.vat_number,
+    receiptFooter: s.receipt_footer,
+    timezone: s.timezone,
   }
 }
 
@@ -36,6 +44,10 @@ const columns: Record<keyof Settings, string> = {
   minmaxMaxDays: 'minmax_max_days',
   minmaxUsageMonths: 'minmax_usage_months',
   maxSaneCost: 'max_sane_cost',
+  defaultFloat: 'default_float',
+  vatNumber: 'vat_number',
+  receiptFooter: 'receipt_footer',
+  timezone: 'timezone',
 }
 
 export async function updateSettings(tx: Tx, patch: Partial<Settings>, userId?: string) {

@@ -11,6 +11,10 @@ import { receivingRoutes } from './receiving.js'
 import { reportRoutes } from './reports.js'
 import { settingsRoutes } from './settings.js'
 import { stockTakeRoutes } from './stocktakes.js'
+import { accountRoutes } from './accounts.js'
+import { cashupRoutes } from './cashup.js'
+import { salesRoutes } from './sales.js'
+import { tillRoutes } from './till.js'
 import * as reports from '../domain/reports.js'
 import { money } from './layout.js'
 
@@ -131,6 +135,10 @@ export function createApp(db: Sql) {
   app.route('/stocktakes', stockTakeRoutes())
   app.route('/reports', reportRoutes())
   app.route('/settings', settingsRoutes())
+  app.route('/cashup', cashupRoutes())
+  app.route('/sales', salesRoutes())
+  app.route('/accounts', accountRoutes())
+  app.route('/', tillRoutes())
   app.route('/api', api())
 
   return app
