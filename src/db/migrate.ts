@@ -1,8 +1,9 @@
 import { readdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import type { Sql } from './index.js'
 
-const dir = new URL('../../migrations/', import.meta.url).pathname
+const dir = fileURLToPath(new URL('../../migrations/', import.meta.url))
 
 /** Apply pending migrations as the schema owner, then make sure the app role can use them. */
 export async function migrate(admin: Sql, appRole = 'sylken_app', appPassword?: string) {
