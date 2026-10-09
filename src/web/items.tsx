@@ -23,6 +23,7 @@ function parseItemForm(b: Record<string, unknown>): Partial<ItemInput> {
     markupOverride: optNum(b.markupPct) === null ? null : optNum(b.markupPct)! / 100,
     vatRate: optNum(b.vatPct) === null ? null : optNum(b.vatPct)! / 100,
     schedule: optNum(b.schedule),
+    nappiCode: String(b.nappiCode ?? '').trim() || null,
     status: (b.status as any) || undefined,
     barcodes: String(b.barcodes ?? '').split(/[\s,]+/).filter(Boolean),
     bins: String(b.bins ?? '').split(',').map((s) => s.trim()).filter(Boolean),
@@ -38,7 +39,7 @@ export function itemRoutes() {
     const offset = Number(c.req.query('offset') ?? 0)
     const items = await run(c, (tx) => searchItems(tx, q, { status, includeDormant: true, limit: 100, offset }))
     // A single exact barcode hit goes straight to the item, like a scan should.
-    if (q && items.length === 1 && (items[0].stockCode === q.trim() || items[0].barcodes.includes(q.trim()))) {
+    if (q && items.length === 1 && (items[0].stockCode === q.trim() || items[0].barcodes.includes(q.trim()) || items[0].nappiCode === q.trim())) {
       return c.redirect(`/items/${items[0].id}`)
     }
     return page(c, 'Items', (
@@ -82,6 +83,7 @@ export function itemRoutes() {
       <label>Markup % (blank = {(settings.defaultMarkup * 100).toFixed(0)}%)<input name="markupPct" type="number" step="0.01" value={i?.markupOverride != null ? (i.markupOverride * 100).toFixed(2) : ''} /></label>
       <label>VAT % (blank = {(settings.vatRate * 100).toFixed(0)}%)<input name="vatPct" type="number" step="0.01" value={i?.vatRate != null ? (i.vatRate * 100).toFixed(2) : ''} /></label>
       <label>Schedule<input name="schedule" type="number" min="0" step="1" value={i?.schedule ?? ''} /></label>
+      <label>NAPPI code (for medical aid claims)<input name="nappiCode" inputmode="numeric" value={i?.nappiCode ?? ''} placeholder="e.g. 708001-001" /></label>
       <label>Barcodes (space separated)<input name="barcodes" value={i?.barcodes?.join(' ') ?? ''} /></label>
       <label>Bins (comma separated)<input name="bins" value={i?.bins?.join(', ') ?? ''} /></label>
       {i && (

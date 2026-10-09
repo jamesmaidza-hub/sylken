@@ -19,6 +19,7 @@ Built so far: **stage 1, items and stock**, **stage 2, till and cash-up**, and *
 ## What stage 2 adds: the till and cash-up
 
 - **Till screen** (`/till/`, F9): scan or search, `3*code` for three packs, `15u*code` for loose units, F4 quantity, F6 price change or discount %, F5 pay, F8 refund, F9 petty cash, F10 payment on an account, F12 reprint the slip. Slips print on an 80 mm printer through the browser.
+- **Touch screen layout**: a button in the till's header switches to big buttons: the shop's own quick-sale items (set under Settings → Till quick buttons, each with a label and colour), a number pad (type 3 then tap an item to sell three), and Quantity, Change price, Void line, Void all, Script, Refund, Reprint and Pay. Each till remembers which layout it uses.
 - **Tenders**: cash (with change, rounded to 5 thebe), card, cheque, EFT / direct bank, customer account (within its credit limit) and medical aid, split any way on one sale. Slips show the VAT included and the shop's VAT number.
 - **Works offline.** The till keeps the item list, its open run and every sale in the browser, and sends them when the server can be reached. Each sale has an id the till made, so a sale sent twice is recorded once. Sales are recorded even if the item was quarantined or stock would go negative, because they already happened. Anything the server can't accept is kept under Cash-up → till problems, never dropped.
 - **Till runs**: each drawer session is a numbered run with its opening float. A run can be opened while offline.

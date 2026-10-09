@@ -18,6 +18,7 @@ export interface Item {
   vatRate: number | null
   markupOverride: number | null
   schedule: number | null
+  nappiCode: string | null
   status: 'active' | 'dormant' | 'quarantined' | 'discontinued'
   statusReason: string | null
   supplierId: string | null
@@ -42,7 +43,7 @@ function toItem(r: any): Item {
     packSizeKnown: r.pack_size_known, sellLoose: r.sell_loose,
     costPerPack: numOrNull(r.cost_per_pack), avgCostPerPack: numOrNull(r.avg_cost_per_pack),
     retailPerPack: num(r.retail_per_pack), vatRate: numOrNull(r.vat_rate), markupOverride: numOrNull(r.markup_override),
-    schedule: r.schedule, status: r.status, statusReason: r.status_reason, supplierId: r.supplier_id,
+    schedule: r.schedule, nappiCode: r.nappi_code ?? null, status: r.status, statusReason: r.status_reason, supplierId: r.supplier_id,
     barcodes: r.barcodes, bins: r.bins, onHandUnits: r.on_hand_units, minUnits: numOrNull(r.min_units), maxUnits: numOrNull(r.max_units),
     minmaxSource: r.minmax_source, externalRefs: r.external_refs,
   }
@@ -57,8 +58,8 @@ export async function getItem(tx: Tx, id: string): Promise<Item | null> {
 export async function findByCode(tx: Tx, code: string): Promise<Item | null> {
   const c = code.trim()
   const [r] = await tx`${select(tx)}
-     where i.stock_code = ${c} or i.id = (select item_id from item_barcodes where barcode = ${c})
-     limit 1`
+     where i.stock_code = ${c} or i.id = (select item_id from item_barcodes where barcode = ${c}) or i.nappi_code = ${c}
+     order by (i.stock_code = ${c}) desc limit 1`
   return r ? toItem(r) : null
 }
 
@@ -102,6 +103,7 @@ export interface ItemInput {
   vatRate?: number | null
   markupOverride?: number | null
   schedule?: number | null
+  nappiCode?: string | null
   status?: Item['status']
   supplierId?: string | null
   barcodes?: string[]
@@ -127,6 +129,7 @@ function validate(settings: Settings, input: Partial<ItemInput>) {
     throw new DomainError(`cost P${input.costPerPack} is outside the allowed range (0 to P${settings.maxSaneCost})`)
   }
   if (input.retailPerPack != null && input.retailPerPack < 0) throw new DomainError('retail cannot be negative')
+  if (input.nappiCode && !/^[0-9]{6,9}(-[0-9]{1,3})?$/.test(input.nappiCode)) throw new DomainError('a NAPPI code is 6 to 9 digits, optionally followed by a dash and a suffix, e.g. 708001-001')
 }
 
 export async function createItem(tx: Tx, input: ItemInput, userId?: string): Promise<Item> {
@@ -135,10 +138,10 @@ export async function createItem(tx: Tx, input: ItemInput, userId?: string): Pro
   const retail = input.retailPerPack ?? (input.costPerPack != null ? priceFor(settings, input.costPerPack, input.markupOverride ?? null, input.vatRate ?? null) : 0)
   const [row] = await tx`
     insert into items (tenant_id, stock_code, description, pack_size, pack_size_known, sell_loose, cost_per_pack, avg_cost_per_pack,
-                       retail_per_pack, vat_rate, markup_override, schedule, status, supplier_id)
+                       retail_per_pack, vat_rate, markup_override, schedule, nappi_code, status, supplier_id)
     values (current_setting('app.tenant_id')::uuid, ${input.stockCode.trim()}, ${input.description.trim()}, ${input.packSize ?? 1},
             ${input.packSize !== undefined}, ${input.sellLoose ?? false}, ${input.costPerPack ?? null}, ${input.costPerPack ?? null},
-            ${retail}, ${input.vatRate ?? null}, ${input.markupOverride ?? null}, ${input.schedule ?? null}, ${input.status ?? 'active'},
+            ${retail}, ${input.vatRate ?? null}, ${input.markupOverride ?? null}, ${input.schedule ?? null}, ${input.nappiCode || null}, ${input.status ?? 'active'},
             ${input.supplierId ?? null})
     on conflict (tenant_id, stock_code) do nothing
     returning id`
@@ -168,6 +171,7 @@ export async function updateItem(tx: Tx, id: string, patch: Partial<ItemInput>, 
   if (patch.vatRate !== undefined) row.vat_rate = patch.vatRate
   if (patch.markupOverride !== undefined) row.markup_override = patch.markupOverride
   if (patch.schedule !== undefined) row.schedule = patch.schedule
+  if (patch.nappiCode !== undefined) row.nappi_code = patch.nappiCode || null
   if (patch.supplierId !== undefined) row.supplier_id = patch.supplierId
   if (patch.status !== undefined) { row.status = patch.status; row.status_reason = null }
   if (Object.keys(row).length) {

@@ -58,6 +58,25 @@ describe('web', () => {
     expect(html.indexOf('ZZZ AMOXIL NEW')).toBeLessThan(html.indexOf('AAA AMOXIL OLD'))
   })
 
+  it('saves till quick buttons and sends them to the till', async () => {
+    const { t, get, post } = await loggedIn()
+    await t.as((tx) => createItem(tx, { stockCode: 'W500', description: 'WATER 500ML', costPerPack: 3 }))
+    const bad = await post('/settings/till-buttons', { buttons: 'NOPE, Nothing, red' })
+    expect(decodeURIComponent(bad.headers.get('location')!)).toMatch(/NOPE/)
+    await post('/settings/till-buttons', { buttons: 'W500, Water, blue\n' })
+    const cat = await (await get('/api/till/catalogue')).json()
+    expect(cat.tenant.buttons).toEqual([{ code: 'W500', label: 'Water', color: 'blue' }])
+  })
+
+  it('keeps a NAPPI code on an item and finds the item by it', async () => {
+    const { t, get } = await loggedIn()
+    const item = await t.as((tx) => createItem(tx, { stockCode: 'AMX500', description: 'AMOXIL 500', costPerPack: 5, nappiCode: '708001-001' }))
+    expect((await get('/items?q=708001-001')).headers.get('location')).toBe(`/items/${item.id}`)
+    const cat = await (await get('/api/till/catalogue')).json()
+    expect(cat.items.find((i: any) => i.c === 'AMX500').x).toBe('708001-001')
+    await expect(t.as((tx) => createItem(tx, { stockCode: 'BAD', description: 'X', nappiCode: 'abc' }))).rejects.toThrow(/NAPPI/)
+  })
+
   it('goes straight to the item when a barcode is scanned into search', async () => {
     const { t, get } = await loggedIn()
     const item = await t.as((tx) => createItem(tx, { stockCode: '6005894000352', description: 'COUGH SYRUP', costPerPack: 10 }))

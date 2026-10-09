@@ -54,8 +54,12 @@ function tillPage(c: Ctx) {
             <span id="run-label" class="muted"></span>
             <span id="cashier" class="muted"></span>
             <span class="spacer"></span>
+            <a class="nav" href="/items" title="Items and stock on hand (F2 in the back office)">Stock</a>
+            <a class="nav" href="/dispensary">Dispensary</a>
+            <a class="nav" href="/" title="Receiving, min/max ordering, reports, cash-up">Back office</a>
             <span id="net" class="net">…</span>
             <span id="pending" class="muted"></span>
+            <button id="touch-toggle" type="button" class="secondary small" title="Switch between the keyboard layout and big buttons for a touch screen">Touch screen</button>
           </header>
           <div id="banner" class="banner" hidden></div>
           <main>
@@ -77,6 +81,22 @@ function tillPage(c: Ctx) {
             <aside class="right">
               <div class="due"><span id="due-label">To pay</span><b id="total">P0.00</b><span id="count" class="muted"></span></div>
               <div id="last" class="last" hidden></div>
+              <div id="touch" class="touch">
+                <div id="quick" class="quick-items"></div>
+                <div class="pad">
+                  <button type="button" data-k="7">7</button><button type="button" data-k="8">8</button><button type="button" data-k="9">9</button>
+                  <button type="button" class="act" data-a="qty">Quantity</button>
+                  <button type="button" data-k="4">4</button><button type="button" data-k="5">5</button><button type="button" data-k="6">6</button>
+                  <button type="button" class="act" data-a="price">Change price</button>
+                  <button type="button" data-k="1">1</button><button type="button" data-k="2">2</button><button type="button" data-k="3">3</button>
+                  <button type="button" class="act warn" data-a="void">Void line</button>
+                  <button type="button" data-k="C">C</button><button type="button" data-k="0">0</button><button type="button" data-k="enter">Enter</button>
+                  <button type="button" class="act bad" data-a="voidall">Void all</button>
+                  <button type="button" class="act" data-a="script">Script</button><button type="button" class="act" data-a="refund">Refund</button>
+                  <button type="button" class="act" data-a="reprint">Reprint</button>
+                  <button type="button" class="pay" data-a="pay">Pay</button>
+                </div>
+              </div>
               <dl class="keys">
                 <dt>F5</dt><dd>Pay</dd>
                 <dt>F2</dt><dd>Script by number</dd>

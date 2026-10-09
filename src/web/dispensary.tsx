@@ -38,7 +38,7 @@ document.querySelectorAll('input[data-items]').forEach((inp) => {
       const res = await fetch('/api/items?q=' + encodeURIComponent(q)); if (!res.ok) return
       dl.replaceChildren(...(await res.json()).map((i) => {
         const o = document.createElement('option'); o.value = i.stockCode
-        o.label = i.description + ' · ' + i.onHandUnits + ' units on hand' + (i.schedule !== null ? ' · S' + i.schedule : ''); return o
+        o.label = i.description + ' · ' + i.onHandUnits + ' units on hand' + (i.schedule !== null ? ' · S' + i.schedule : '') + (i.nappiCode ? ' · NAPPI ' + i.nappiCode : ''); return o
       }))
     }, 200)
   })
@@ -404,7 +404,7 @@ export function dispensaryRoutes() {
             <tr>
               <td>{l.lineNo}</td>
               <td><a href={`/items/${l.itemId}`}>{l.description}</a> <span class="muted">{l.stockCode}</span>
-                {l.schedule !== null && <span class="chip">S{l.schedule}</span>}{l.noClaim && <span class="chip">no claim</span>}
+                {l.schedule !== null && <span class="chip">S{l.schedule}</span>}{l.nappiCode && <span class="chip">NAPPI {l.nappiCode}</span>}{l.noClaim && <span class="chip">no claim</span>}
                 {draft && <div class="hint">{l.onHandUnits} units on hand{l.packSize > 1 ? `, pack of ${l.packSize}` : ''}</div>}</td>
               <td class="n">{l.qtyUnits}</td>
               <td class="n">{draft && s.repeatOf

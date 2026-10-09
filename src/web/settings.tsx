@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
-import { repriceItems } from '../domain/items.js'
-import { getSettings, updateSettings } from '../domain/settings.js'
+import { findByCode, repriceItems } from '../domain/items.js'
+import { buttonColors, getSettings, parseTillButtons, updateSettings } from '../domain/settings.js'
 import { back, page, requireRole, run, type Env } from './app.js'
 
 export function settingsRoutes() {
@@ -30,6 +30,13 @@ export function settingsRoutes() {
           Retail = cost × (1 + markup) × (1 + VAT). With the defaults that is cost × {((1 + s.defaultMarkup) * (1 + s.vatRate)).toFixed(3)}.
           Changing VAT or markup does not re-price items by itself.
         </p>
+        <h2>Till quick buttons</h2>
+        <form method="post" action="/settings/till-buttons" class="panel" style="display:grid;gap:8px">
+          <label class="f">One item per line: stock code or barcode, then the button label, then a colour ({buttonColors.join(', ')})
+            <textarea name="buttons" rows={8} style="font-family:ui-monospace,monospace" placeholder={'6009695580167, Panado syrup, green\nUSER141, Ibuprofen 100, blue'}>{s.tillButtons.map((b) => `${b.code}, ${b.label}, ${b.color}`).join('\n')}</textarea></label>
+          <div><button>Save till buttons</button></div>
+        </form>
+        <p class="hint">These show on the till's touch layout, so the items sold most are one tap away.</p>
         <form method="post" action="/settings/reprice" class="panel row">
           <span>Re-price every active item from its cost using the rule above.</span><span class="spacer" />
           <button class="danger">Re-price all items</button>
@@ -56,6 +63,17 @@ export function settingsRoutes() {
       receiptFooter: String(b.receiptFooter ?? '').trim() || null,
     }, c.get('user').userId))
     return back(c, '/settings', { ok: 'Settings saved' })
+  })
+
+  r.post('/till-buttons', async (c) => {
+    requireRole(c, ['owner'])
+    const b = await c.req.parseBody()
+    const n = await run(c, async (tx) => {
+      const buttons = await parseTillButtons(tx, String(b.buttons ?? ''), findByCode)
+      await updateSettings(tx, { tillButtons: buttons }, c.get('user').userId)
+      return buttons.length
+    })
+    return back(c, '/settings', { ok: `${n} till buttons saved. Reload the till to see them.` })
   })
 
   r.post('/reprice', async (c) => {

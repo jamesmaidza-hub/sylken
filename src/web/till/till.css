@@ -83,3 +83,28 @@ button.secondary{background:var(--chip);color:var(--ink)}
 }
 @media (max-width:760px){main{grid-template-columns:1fr;padding:12px 16px}.keys{display:none}.due b{font-size:30px}}
 .rx{display:inline-block;background:var(--chip,#eef1f4);border-radius:8px;padding:0 6px;font-size:12px;font-weight:600}
+/* Touch screen layout: big buttons beside the sale. Hidden in the keyboard layout. */
+button.small{padding:5px 10px;font-size:13px}
+.touch{display:none}
+body.touch-mode main{grid-template-columns:minmax(340px,1fr) minmax(460px,1.25fr)}
+body.touch-mode .keys{display:none}
+body.touch-mode .touch{display:flex;flex-direction:column;gap:12px}
+body.touch-mode .cart td{padding:14px 12px;font-size:17px}
+body.touch-mode .due b{font-size:40px}
+.quick-items{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px}
+.quick-items p{grid-column:1/-1;margin:0}
+.qi{min-height:64px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-weight:600;font-size:15px;line-height:1.2;border-radius:8px;color:#fff;text-align:center;padding:6px}
+.qi small{font-weight:400;font-size:12px;opacity:.9;font-variant-numeric:tabular-nums}
+.qi:disabled{opacity:.4;cursor:not-allowed}
+.qi:active,.pad button:active{transform:scale(.97)}
+.c-green{background:#18794e}.c-blue{background:#1d5fbf}.c-teal{background:#0d6b5e}.c-amber{background:#a5530a}
+.c-red{background:#b42318}.c-purple{background:#6941c6}.c-grey{background:#5d6676}
+.pad{display:grid;grid-template-columns:repeat(3,1fr) 1.4fr;gap:8px}
+.pad button{min-height:60px;font-size:24px;font-weight:600;background:var(--panel);color:var(--ink);border:1px solid var(--line);border-radius:8px}
+.pad button.act{font-size:16px;background:var(--chip)}
+.pad button.warn{background:color-mix(in srgb,var(--warn) 22%,var(--panel));color:var(--ink)}
+.pad button.bad{background:var(--bad);color:#fff;border-color:var(--bad)}
+.pad button.pay{grid-column:4;background:var(--accent);color:var(--accent-ink);border-color:var(--accent);font-size:26px}
+@media (max-width:900px){body.touch-mode main{grid-template-columns:1fr}}
+header a.nav{color:var(--ink);text-decoration:none;padding:5px 10px;border-radius:6px;background:var(--chip);font-size:14px}
+header a.nav:hover{background:color-mix(in srgb,var(--accent) 18%,var(--chip))}

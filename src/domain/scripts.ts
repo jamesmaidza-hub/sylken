@@ -138,14 +138,14 @@ export async function removeLine(tx: Tx, scriptId: string, lineId: string) {
 async function reprice(tx: Tx, scriptId: string) {
   const settings = await getSettings(tx)
   const lines = await tx`
-    select l.id, l.qty_units, i.retail_per_pack, i.pack_size, i.vat_rate, i.avg_cost_per_pack, i.cost_per_pack
+    select l.id, l.qty_units, i.retail_per_pack, i.pack_size, i.vat_rate, i.avg_cost_per_pack, i.cost_per_pack, i.nappi_code
       from script_lines l join items i on i.id = l.item_id where l.script_id = ${scriptId}`
   for (const l of lines) {
     const rate = numOrNull(l.vat_rate) ?? settings.vatRate
     const p = priceLine(num(l.retail_per_pack), l.pack_size, l.qty_units, rate, settings.dispensingFee, settings.vatRate)
     const packCost = numOrNull(l.avg_cost_per_pack) ?? numOrNull(l.cost_per_pack)
     await tx`update script_lines set item_total = ${p.itemTotal}, fee = ${p.fee}, line_total = ${p.lineTotal}, vat_rate = ${rate},
-                                     line_vat = ${p.vat}, unit_cost = ${packCost === null ? null : packCost / l.pack_size}
+                                     line_vat = ${p.vat}, unit_cost = ${packCost === null ? null : packCost / l.pack_size}, nappi_code = ${l.nappi_code}
               where id = ${l.id}`
   }
   await tx`
@@ -166,6 +166,7 @@ export interface ScriptLine {
   description: string
   packSize: number
   schedule: number | null
+  nappiCode: string | null
   itemStatus: string
   onHandUnits: number
   qtyUnits: number
@@ -260,7 +261,7 @@ export async function getScript(tx: Tx, id: string): Promise<Script | null> {
   }
   const shaped: ScriptLine[] = lines.map((l) => ({
     id: l.id, lineNo: l.line_no, itemId: l.item_id, stockCode: l.stock_code, description: l.description, packSize: l.pack_size,
-    schedule: l.schedule, itemStatus: l.item_status, onHandUnits: l.on_hand, qtyUnits: l.qty_units, supplyUnits: l.supply_units,
+    schedule: l.schedule, nappiCode: l.nappi_code, itemStatus: l.item_status, onHandUnits: l.on_hand, qtyUnits: l.qty_units, supplyUnits: l.supply_units,
     owedUnits: l.owed_qty && !l.owed_cancelled ? l.owed_qty - l.owed_supplied : 0,
     directions: l.directions, supplyDays: l.supply_days, repeats: l.repeats,
     repeatsLeft: s.repeat_of ? null : Math.max(0, l.repeats - l.repeats_used), repeatOfLine: l.repeat_of_line,

@@ -23,7 +23,12 @@ export interface Settings {
   labelHeightMm: number
   labelFooter: string | null
   cashRounding: number
+  tillButtons: TillButton[]
 }
+
+/** A quick-sale button on the till's touch layout. */
+export interface TillButton { code: string; label: string; color: string }
+export const buttonColors = ['green', 'blue', 'teal', 'amber', 'red', 'purple', 'grey'] as const
 
 export async function getSettings(tx: Tx): Promise<Settings> {
   const [s] = await tx`select * from tenant_settings`
@@ -49,6 +54,7 @@ export async function getSettings(tx: Tx): Promise<Settings> {
     labelHeightMm: s.label_height_mm,
     labelFooter: s.label_footer,
     cashRounding: num(s.cash_rounding),
+    tillButtons: (s.till_buttons ?? []) as TillButton[],
   }
 }
 
@@ -73,15 +79,36 @@ const columns: Record<keyof Settings, string> = {
   labelHeightMm: 'label_height_mm',
   labelFooter: 'label_footer',
   cashRounding: 'cash_rounding',
+  tillButtons: 'till_buttons',
 }
 
 export async function updateSettings(tx: Tx, patch: Partial<Settings>, userId?: string) {
   const row: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(patch)) if (v !== undefined) row[columns[k as keyof Settings]] = v
+  for (const [k, v] of Object.entries(patch)) if (v !== undefined) row[columns[k as keyof Settings]] = k === 'tillButtons' ? tx.json(v as any) : v
   if (!Object.keys(row).length) return
   await tx`update tenant_settings set ${tx(row)}, updated_at = now()`
   await tx`insert into audit_log (tenant_id, user_id, action, entity, detail)
            values (current_setting('app.tenant_id')::uuid, ${userId ?? null}, 'update', 'settings', ${tx.json(row as any)})`
+}
+
+/**
+ * Reads the till buttons as the shop types them, one per line: "code, label, colour".
+ * The label and colour may be left out. Every code must be an item the shop has.
+ */
+export async function parseTillButtons(tx: Tx, text: string, find: (tx: Tx, code: string) => Promise<{ description: string } | null>): Promise<TillButton[]> {
+  const out: TillButton[] = []
+  const unknown: string[] = []
+  for (const line of text.split(/\r?\n/)) {
+    if (!line.trim()) continue
+    const [code, label, color] = line.split(',').map((x) => x.trim())
+    const item = await find(tx, code)
+    if (!item) { unknown.push(code); continue }
+    const c = (color || '').toLowerCase()
+    out.push({ code, label: (label || item.description).slice(0, 40), color: (buttonColors as readonly string[]).includes(c) ? c : buttonColors[out.length % buttonColors.length] })
+  }
+  if (unknown.length) throw new DomainError(`No item has the code ${unknown.join(', ')}. Use the stock code or a barcode.`)
+  if (out.length > 48) throw new DomainError('The till has room for 48 buttons at most.')
+  return out
 }
 
 /** The pharmacy's own name, address and phone, printed on labels. */
