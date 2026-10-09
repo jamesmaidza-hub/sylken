@@ -9,7 +9,7 @@ import {
 } from '../domain/patients.js'
 import { bounds } from '../domain/sales.js'
 import {
-  addLine, cancelOwed, createDraft, discardDraft, dispenseScript, draftScripts, getScript, initials, labelsFor, listOwed, patientScripts,
+  addDays, addLine, cancelOwed, createDraft, discardDraft, dispenseScript, draftScripts, getScript, initials, labelsFor, listOwed, patientScripts,
   register, removeLine, reverseScript, scriptBook, scriptIdByNo, scriptWarnings, setSupply, startRepeat, supplyOwed, updateDraft, type Label,
 } from '../domain/scripts.js'
 import { getSettings, getShop, nextScriptNo, setNextScriptNo, updateSettings, updateShop } from '../domain/settings.js'
@@ -59,7 +59,137 @@ const scriptKeys = (patientId: string) => `
     F4: () => { f.supply.value = '0'; mark(f.supply) },
     F8: () => { f.repeats.focus(); f.repeats.select(); mark(f.repeats) },
   })
+
+  // Changing the doctor or who pays saves straight away.
+  const h = document.getElementById('rx-head')
+  if (h) h.querySelectorAll('select, input[type=checkbox]').forEach((el) => el.addEventListener('change', () => h.requestSubmit()))
+
+  // Show what the directions code will print on the label.
+  const dirs = {}; document.querySelectorAll('#dir-dl option').forEach((o) => { dirs[o.value.toUpperCase()] = o.textContent })
+  const dt = document.getElementById('dir-text'), dtHint = dt.innerHTML
+  const showDir = () => { const v = f.directions.value.trim(); if (!v) { dt.innerHTML = dtHint; return } dt.textContent = dirs[v.toUpperCase()] || v }
+  f.directions.addEventListener('input', showDir); f.directions.addEventListener('change', showDir)
+
+  // Show the item picked: name, stock on hand, pack size and price.
+  const info = document.getElementById('item-info'); let seq = 0
+  const showItem = async () => {
+    const v = f.item.value.trim(), n = ++seq; if (!v) { info.textContent = ''; return }
+    let it = null
+    const r = await fetch('/api/items/lookup?code=' + encodeURIComponent(v))
+    if (r.ok) it = await r.json()
+    else { const l = await fetch('/api/items?q=' + encodeURIComponent(v)); const a = l.ok ? await l.json() : []; if (a.length === 1) it = a[0] }
+    if (n !== seq) return
+    if (!it) { info.textContent = ''; return }
+    info.replaceChildren()
+    const b = document.createElement('b'); b.textContent = it.description; info.append(b)
+    const low = it.onHandUnits <= 0
+    const sp = document.createElement('span'); sp.className = low ? 'neg' : ''; sp.textContent = ' · ' + it.onHandUnits + ' units on hand'; info.append(sp)
+    info.append((it.packSize > 1 ? ' · pack of ' + it.packSize : '') + ' · P' + Number(it.retailPerPack).toFixed(2) + ' a pack' + (it.schedule !== null ? ' · Schedule ' + it.schedule : ''))
+  }
+  f.item.addEventListener('change', showItem)
+
+  // Item finder pop-up.
+  const fd = document.getElementById('finder')
+  if (fd) {
+    const q = document.getElementById('fd-q'), rows = document.getElementById('fd-rows'), det = document.getElementById('fd-detail')
+    let items = [], at = -1, tab = 'general', fseq = 0, timer
+    const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+    const pula = (n) => 'P' + Number(n).toFixed(2)
+    const kv = (pairs) => '<dl class="rx-kv">' + pairs.filter((p) => p[1] !== null && p[1] !== '').map((p) => '<dt>' + esc(p[0]) + '</dt><dd>' + esc(p[1]) + '</dd>').join('') + '</dl>'
+    const detail = () => {
+      const it = items[at]
+      if (!it) { det.innerHTML = '<span class="muted">Pick an item to see its details.</span>'; return }
+      document.getElementById('fd-open').href = '/items/' + it.id
+      det.innerHTML = tab === 'general' ? kv([['Description', it.description], ['Stock code', it.stockCode], ['Barcodes', (it.barcodes || []).join(', ')], ['NAPPI', it.nappiCode],
+          ['Pack size', it.packSize], ['Schedule', it.schedule === null ? 'Unscheduled' : 'S' + it.schedule], ['Status', it.status + (it.statusReason ? ' (' + it.statusReason + ')' : '')]])
+        : tab === 'pricing' ? kv([['Price a pack', pula(it.retailPerPack)], ['Price a unit', it.packSize > 1 ? pula(it.retailPerPack / it.packSize) : ''],
+          ['Cost a pack', it.costPerPack === null ? '' : pula(it.costPerPack)], ['VAT', it.vatRate === null ? 'Standard' : Math.round(it.vatRate * 100) + '%']])
+        : kv([['On hand', it.onHandUnits + ' units'], ['Min', it.minUnits], ['Max', it.maxUnits], ['Shelf', (it.bins || []).join(', ')]])
+    }
+    const move = (i) => {
+      if (!items.length) return
+      at = Math.max(0, Math.min(items.length - 1, i))
+      rows.querySelectorAll('tr').forEach((r, k) => r.classList.toggle('sel', k === at))
+      const r = rows.children[at]; if (r) r.scrollIntoView({ block: 'nearest' })
+      detail()
+    }
+    const search = async () => {
+      const n = ++fseq, res = await fetch('/api/items?q=' + encodeURIComponent(q.value.trim()))
+      if (n !== fseq || !res.ok) return
+      items = await res.json()
+      rows.innerHTML = items.map((it) => '<tr><td>' + esc(it.stockCode) + '</td><td>' + esc(it.description) + (it.status !== 'active' ? ' <span class="chip">' + esc(it.status) + '</span>' : '') + '</td><td class="n">' + esc(it.packSize) +
+        '</td><td>' + (it.schedule === null ? '' : 'S' + it.schedule) + '</td><td>' + esc(it.nappiCode) + '</td><td class="n' + (it.onHandUnits <= 0 ? ' neg' : '') + '">' + it.onHandUnits +
+        '</td><td class="n">' + pula(it.retailPerPack) + '</td></tr>').join('') || '<tr><td colspan="7" class="muted">Nothing matches.</td></tr>'
+      document.getElementById('fd-count').textContent = items.length ? items.length + (items.length === 25 ? '+' : '') + ' found' : ''
+      at = -1; move(0); if (!items.length) detail()
+    }
+    const pick = () => {
+      const it = items[at]; if (!it) return
+      f.item.value = it.stockCode; fd.close(); mark(f.item); showItem(); f.qty.focus()
+    }
+    const open = () => { q.value = f.item.value.trim(); fd.showModal(); q.focus(); q.select(); search() }
+    document.getElementById('find-item').addEventListener('click', open)
+    window.pageKeys.F5 = () => { if (!fd.open) open() }
+    q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 180) })
+    q.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); move(at + (e.key === 'ArrowDown' ? 1 : -1)) }
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); clearTimeout(timer); pick() }
+      if (e.key === 'Escape') { e.preventDefault(); fd.close(); f.item.focus() }
+    })
+    rows.addEventListener('click', (e) => { const r = e.target.closest('tr'); if (r) move([...rows.children].indexOf(r)) })
+    rows.addEventListener('dblclick', pick)
+    fd.querySelector('.fd-tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tab]'); if (!b) return
+      tab = b.dataset.tab; fd.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('on', x === b)); detail(); q.focus()
+    })
+    document.getElementById('fd-select').addEventListener('click', pick)
+    document.getElementById('fd-cancel').addEventListener('click', () => fd.close())
+  }
+
+  const go = document.getElementById('rx-go')
+  const dispense = () => { const d = document.querySelector('form[action$="/dispense"]'); if (d) { d.scrollIntoView({ behavior: 'smooth' }); d.requestSubmit() } }
+  if (go) go.addEventListener('click', () => { const d = document.querySelector('form[action$="/dispense"]'); if (d) { d.scrollIntoView({ behavior: 'smooth' }); const btn = d.querySelector('button'); if (btn) btn.focus({ preventScroll: true }) } })
+
+  // Touch layout: tiles fill the form, the number pad types into the last number box tapped.
+  const t = document.getElementById('rx-touch')
+  if (!t) return
+  const names = { qty: 'Quantity', supply: 'Give now', repeats: 'Repeats', supplyDays: 'Supply days' }
+  let target = f.qty
+  for (const n of Object.keys(names)) f[n].addEventListener('focus', () => { target = f[n]; document.getElementById('pad-target').textContent = names[n] })
+  t.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return
+    if (b.dataset.code) { f.item.value = b.dataset.code; mark(f.item); showItem(); target = f.qty; f.qty.value = ''; document.getElementById('pad-target').textContent = names.qty }
+    if (b.dataset.dir) { f.directions.value = b.dataset.dir; mark(f.directions); showDir(); t.querySelectorAll('[data-dir]').forEach((x) => x.classList.toggle('on', x === b)) }
+    if (b.dataset.pad) { const k = b.dataset.pad; target.value = k === 'C' ? '' : k === '⌫' ? target.value.slice(0, -1) : target.value + k; mark(target) }
+    if (b.dataset.per) { f.per.value = b.dataset.per; mark(f.per) }
+    const a = b.dataset.act
+    if (a === 'F3' || a === 'F4') window.pageKeys[a]()
+    if (a === 'rep') { f.repeats.value = String((Number(f.repeats.value) || 0) + 1); mark(f.repeats) }
+    if (a === 'park') window.pageKeys['Ctrl+u']()
+    if (a === 'add') f.requestSubmit()
+    if (a === 'dispense') dispense()
+  })
 })()`
+
+/** A row of big picture buttons across the top of the dispensary screens. */
+function RxToolbar({ on, patientId }: { on?: string; patientId?: string }) {
+  const tools: [string, string, string, string][] = [
+    ['find', '🔍', 'Find patient', '/dispensary'],
+    ['new', '👤', 'New patient', '/dispensary/patients/new'],
+    ...(patientId ? [['history', '📋', 'History', `/dispensary/patients/${patientId}#scripts`] as [string, string, string, string]] : []),
+    ['owed', '📦', 'Owed items', '/dispensary/owed'],
+    ['book', '📖', 'Script book', '/dispensary/scripts'],
+    ['register', '🔒', 'Register', '/dispensary/register'],
+    ['doctors', '🩺', 'Doctors', '/dispensary/doctors'],
+    ['till', '🧾', 'Till', '/till/'],
+    ['settings', '⚙️', 'Settings', '/dispensary/settings'],
+  ]
+  return (
+    <nav class="toolbar">{tools.map(([k, icon, label, href]) => (
+      <a href={href} class={k === on ? 'on' : ''}><span class="ico" aria-hidden="true">{icon}</span>{label}</a>
+    ))}</nav>
+  )
+}
 
 function PatientPanel({ p, flags }: { p: Patient; flags?: { kind: string; text: string; detail: string | null }[] }) {
   const age = ageOn(p.dateOfBirth)
@@ -82,6 +212,55 @@ function PatientPanel({ p, flags }: { p: Patient; flags?: { kind: string; text: 
       {alerts.map((a) => <div class="msg warn" style="margin:8px 0 0">{a.text}</div>)}
       {p.medicalAidMessage && <div class="hint" style="margin-top:6px">{p.medicalAidName}: {p.medicalAidMessage}</div>}
     </div>
+  )
+}
+
+/** The patient box beside the script: who they are, how they pay, and allergies in red. */
+function PatientCard({ p, flags, balance }: { p: Patient; flags: { kind: string; text: string; detail: string | null }[]; balance: number | null }) {
+  const age = ageOn(p.dateOfBirth)
+  const allergies = flags.filter((f) => f.kind === 'allergy')
+  const alerts = flags.filter((f) => f.kind === 'alert')
+  return (
+    <div class="panel rx-side"><h3>Patient information</h3>
+      <dl class="rx-kv">
+        {(age !== null || p.sex) && <><dt>Age</dt><dd>{age !== null ? `${age} yrs` : ''}{p.sex ? ` · ${p.sex}` : ''}</dd></>}
+        {p.idNo && <><dt>ID</dt><dd>{p.idNo}</dd></>}
+        {p.phone && <><dt>Phone</dt><dd>{p.phone}</dd></>}
+        {p.address && <><dt>Address</dt><dd>{p.address}</dd></>}
+        <dt>Medical aid</dt><dd>{p.medicalAidName ? <>{p.medicalAidName} <b>{p.memberNo}</b>{p.dependantCode && <span class="muted"> / {p.dependantCode}</span>}</> : <span class="muted">Private</span>}</dd>
+        {p.mainMemberName && <><dt>Main member</dt><dd>{p.mainMemberName}</dd></>}
+        {p.accountName && <><dt>Account</dt><dd>{p.accountName}{balance !== null && <> · balance <b class={balance > 0 ? 'neg' : ''}>{money(balance)}</b></>}</dd></>}
+      </dl>
+      {allergies.length
+        ? <div class="msg err rx-allergy">Allergies: {allergies.map((a) => <b>{a.text}{a.detail ? ` (${a.detail})` : ''} </b>)}</div>
+        : <div class="hint" style="margin-top:8px">No allergies on file</div>}
+      {alerts.map((a) => <div class="msg warn" style="margin:8px 0 0">{a.text}</div>)}
+      {p.medicalAidMessage && <div class="hint" style="margin-top:6px">{p.medicalAidName}: {p.medicalAidMessage}</div>}
+    </div>
+  )
+}
+
+/** A pop-up item finder over the script: search, arrow through the results, see the item's details, Enter puts it on the script. */
+function ItemFinder() {
+  return (
+    <dialog id="finder" class="finder" aria-label="Find an item">
+      <div class="row"><b style="font-size:18px">Find an item</b><span class="spacer" /><span class="hint" id="fd-count" /></div>
+      <input id="fd-q" type="text" placeholder="Name, stock code, barcode or NAPPI" autocomplete="off" />
+      <div class="fd-grid"><table>
+        <thead><tr><th>Code</th><th>Description</th><th class="n">Pack</th><th>Sch</th><th>NAPPI</th><th class="n">On hand</th><th class="n">Price/pack</th></tr></thead>
+        <tbody id="fd-rows" />
+      </table></div>
+      <div class="fd-tabs" role="tablist">
+        <button type="button" class="on" data-tab="general">General</button><button type="button" data-tab="pricing">Pricing</button><button type="button" data-tab="stock">Stock</button>
+      </div>
+      <div class="fd-detail" id="fd-detail"><span class="muted">Pick an item to see its details.</span></div>
+      <div class="row" style="margin-top:12px">
+        <span class="hint"><kbd>↑</kbd><kbd>↓</kbd>move <kbd>Enter</kbd>put on the script <kbd>Esc</kbd>close</span><span class="spacer" />
+        <a class="btn secondary" id="fd-open" target="_blank" href="/items">Open item record</a>
+        <button type="button" class="secondary" id="fd-cancel">Cancel</button>
+        <button type="button" id="fd-select">Select</button>
+      </div>
+    </dialog>
   )
 }
 
@@ -142,13 +321,8 @@ export function dispensaryRoutes() {
     }))
     return page(c, 'Dispensary', (
       <>
-        <div class="row"><h1>Dispensary</h1><span class="spacer" />
-          <a class="btn secondary" href="/dispensary/scripts">Script book</a>
-          <a class="btn secondary" href="/dispensary/owed">Owed items ({owed.length})</a>
-          <a class="btn secondary" href="/dispensary/register">Register</a>
-          <a class="btn secondary" href="/dispensary/doctors">Doctors</a>
-          <a class="btn secondary" href="/dispensary/settings">Dispensing settings</a>
-        </div>
+        <RxToolbar on="find" />
+        <div class="row"><h1>Dispensary</h1><span class="spacer" />{owed.length > 0 && <a href="/dispensary/owed">{owed.length} owed item{owed.length === 1 ? '' : 's'} waiting</a>}</div>
         <form class="row panel">
           <input name="q" data-search value={q} placeholder="Patient surname (and first name), ID, member number or phone  ( / )" style="flex:1" autofocus />
           <button>Find</button>
@@ -198,6 +372,7 @@ export function dispensaryRoutes() {
     const seed = c.req.query('surname') ? ({ surname: c.req.query('surname')!.toUpperCase() } as Patient) : null
     return page(c, 'New patient', (
       <>
+        <RxToolbar on="new" />
         <h1>{data.main ? `New dependant of ${data.main.name}` : 'New patient'}</h1>
         {data.main && <p class="muted">Dependants use {data.main.name}'s medical aid ({data.main.medicalAidName ?? 'none'} {data.main.memberNo ?? ''}).</p>}
         <PatientForm action="/dispensary/patients" p={seed} mainMember={data.main} aids={data.aids} doctors={data.doctors} accounts={data.accounts} submit="Add patient" />
@@ -228,6 +403,7 @@ export function dispensaryRoutes() {
     const today = new Date().toISOString().slice(0, 10)
     return page(c, p.name, (
       <>
+        <RxToolbar patientId={p.id} />
         <h1>{p.name}{!p.active && <span class="st-dormant"> (inactive)</span>}</h1>
         <PatientPanel p={p} flags={data.flags} />
         <h2>New script</h2>
@@ -336,6 +512,7 @@ export function dispensaryRoutes() {
     const sum = (f: (s: (typeof rows)[number]) => number) => live.reduce((a, s) => a + f(s), 0)
     return page(c, 'Script book', (
       <>
+        <RxToolbar on="book" />
         <div class="row"><h1>Script book</h1><span class="spacer" /><a class="btn secondary" href={`?from=${range.from}&to=${range.to}&format=csv`}>Download CSV</a></div>
         <RangeForm {...range} />
         <p class="muted">{live.length} scripts dispensed{rows.length > live.length ? `, ${rows.length - live.length} reversed` : ''}: {money(sum((s) => s.total))} in total,
@@ -362,8 +539,15 @@ export function dispensaryRoutes() {
       if (!s) throw new DomainError('unknown script', 'not_found', 404)
       const settings = await getSettings(tx)
       const flags = await patientFlags(tx, s.patient.id)
-      return { s, settings, flags, warnings: s.status === 'draft' ? scriptWarnings(s, flags, settings) : [],
-        doctors: await listDoctors(tx, '', { activeOnly: true }), directions: await listDirections(tx) }
+      // The directions used most, for the touch layout's tiles.
+      const topDirections = s.status === 'draft' ? await tx`
+        select d.code, d.text from directions d left join script_lines l on l.directions = d.text
+         group by d.code, d.text order by count(l.id) desc, d.code limit 16` : []
+      const [acct] = s.patient.accountId
+        ? await tx`select coalesce(sum(amount), 0) as b from account_entries where account_id = ${s.patient.accountId}` : []
+      return { s, settings, flags, balance: acct ? Number(acct.b) : null, warnings: s.status === 'draft' ? scriptWarnings(s, flags, settings) : [],
+        doctors: await listDoctors(tx, '', { activeOnly: true }), directions: await listDirections(tx),
+        topDirections: topDirections.map((d) => ({ code: d.code as string, text: d.text as string })) }
     })
     const { s, warnings, settings } = data
     const draft = s.status === 'draft'
@@ -374,6 +558,7 @@ export function dispensaryRoutes() {
     const title = draft ? (s.repeatOf ? `Repeat of script ${s.repeatOf.scriptNo}` : 'New script') : `Script ${s.scriptNo}`
     return page(c, title, (
       <>
+        <RxToolbar patientId={s.patient.id} />
         <div class="row">
           <h1>{title} {statusChip(s.status)}</h1><span class="spacer" />
           {s.status === 'dispensed' && <a class="btn" href={`/dispensary/scripts/${s.id}/labels`} target="_blank">Print labels</a>}
@@ -381,23 +566,96 @@ export function dispensaryRoutes() {
             <form method="post" action={`/dispensary/scripts/${s.id}/repeat`}><button class="secondary">Give a repeat</button></form>}
           {s.repeatOf && <a class="btn secondary" href={`/dispensary/scripts/${s.repeatOf.id}`}>Original script {s.repeatOf.scriptNo}</a>}
         </div>
-        <PatientPanel p={s.patient} flags={data.flags} />
-        <div class="panel row">
-          {draft && !s.repeatOf
-            ? <form method="post" action={`/dispensary/scripts/${s.id}`} class="row" style="flex:1">
-                <label class="f">Doctor<select name="doctorId"><option value="">None on the script</option>{data.doctors.map((d) => <option value={d.id} selected={d.id === s.doctorId}>{d.name}{d.practiceNo ? ` (${d.practiceNo})` : ''}</option>)}</select></label>
-                <label class="f">Date on the script<input name="rxDate" type="date" value={s.rxDate} required /></label>
-                {s.patient.medicalAidName && <label class="row" style="flex-direction:row"><input type="checkbox" name="private" checked={!s.billMedicalAid} /> Patient pays</label>}
-                <button class="secondary">Save</button>
-              </form>
-            : <span>{s.doctorName ? <>Dr: <b>{s.doctorName}</b>{s.doctorPracticeNo && <span class="muted"> ({s.doctorPracticeNo})</span>}</> : <span class="muted">No doctor</span>} · Script date {date(s.rxDate)}
-                {s.repeatNo ? <> · Repeat {s.repeatNo}</> : ''}</span>}
-          <span class="spacer" />
-          <span>{s.medicalAidName ? <>Bill <b>{s.medicalAidName}</b> {s.memberNo}{s.dependantCode ? `/${s.dependantCode}` : ''}</> : <span class="muted">Patient pays all</span>}</span>
+        <div class="rx-desk">
+          <div class="panel rx-form">
+            <div class="rx-row"><span class="rx-l">Patient</span>
+              <b class="rx-big"><a href={`/dispensary/patients/${s.patient.id}`}>{s.patient.name}</a></b>
+              {draft && !s.repeatOf && <a class="btn secondary" href="/dispensary" title="Park this script and find another patient">🔍 Other patient</a>}</div>
+            {draft && !s.repeatOf
+              ? <form method="post" action={`/dispensary/scripts/${s.id}`} id="rx-head">
+                  <div class="rx-row"><label class="rx-l" for="rx-doctor">Doctor</label>
+                    <select id="rx-doctor" name="doctorId" class="grow"><option value="">None on the script</option>{data.doctors.map((d) => <option value={d.id} selected={d.id === s.doctorId}>{d.name}{d.practiceNo ? ` (${d.practiceNo})` : ''}</option>)}</select>
+                    <a class="btn secondary" href="/dispensary/doctors" title="Add or find a doctor">🩺 Doctors</a></div>
+                  <div class="rx-row"><label class="rx-l" for="rx-date">Script date</label>
+                    <input id="rx-date" name="rxDate" type="date" value={s.rxDate} required />
+                    {s.patient.medicalAidName && <label class="chk"><input type="checkbox" name="private" checked={!s.billMedicalAid} /> Patient pays, don't bill {s.patient.medicalAidName}</label>}
+                    <button class="secondary">Save</button></div>
+                </form>
+              : <>
+                  <div class="rx-row"><span class="rx-l">Doctor</span>{s.doctorName ? <span><b>{s.doctorName}</b>{s.doctorPracticeNo && <span class="muted"> ({s.doctorPracticeNo})</span>}</span> : <span class="muted">None on the script</span>}</div>
+                  {s.repeatOf && <div class="rx-row"><span class="rx-l">Repeat</span><span>Repeat {s.repeatNo} of script {s.repeatOf.scriptNo}. Set what to give now in the lines below.</span></div>}
+                </>}
+            {draft && !s.repeatOf && <form method="post" action={`/dispensary/scripts/${s.id}/lines`} id="add-line">
+              <div class="rx-row"><label class="rx-l" for="rx-item">Item</label>
+                <input id="rx-item" name="item" list="items-dl" data-items required autofocus autocomplete="off" placeholder="Scan, or type a code or name" class="grow" />
+                <button type="button" class="secondary" id="find-item" title="F5">🔍 Find item</button></div>
+              <datalist id="items-dl" />
+              <div class="rx-info" id="item-info" />
+              <div class="rx-row"><label class="rx-l" for="rx-qty">Quantity</label>
+                <input id="rx-qty" name="qty" type="number" min="1" step="1" required class="num" />
+                <select name="per"><option value="units">units</option><option value="packs">packs</option></select>
+                <label for="rx-supply">Give now</label><input id="rx-supply" name="supply" type="number" min="0" step="1" placeholder="all" class="num" /></div>
+              <div class="rx-row"><label class="rx-l" for="rx-dir">Directions</label>
+                <input id="rx-dir" name="directions" list="dir-dl" required autocomplete="off" placeholder="e.g. 1T3D" style="width:150px" />
+                <label for="rx-days">Days</label><input id="rx-days" name="supplyDays" type="number" min="1" value={settings.defaultSupplyDays} class="num" />
+                <label for="rx-rep">Repeats</label><input id="rx-rep" name="repeats" type="number" min="0" max="12" value="0" class="num" /></div>
+              <datalist id="dir-dl">{data.directions.map((d) => <option value={d.code}>{d.text}</option>)}</datalist>
+              <div class="rx-row"><span class="rx-l">Label reads</span><div class="rx-instr" id="dir-text"><span class="muted">Type a code like 1T3D, or write the directions out</span></div></div>
+              <div class="rx-row"><label class="rx-l" for="rx-icd">ICD-10</label><input id="rx-icd" name="icd10" placeholder="e.g. J06.9" style="width:150px" />
+                <label class="chk"><input type="checkbox" name="noClaim" /> Patient pays this line</label></div>
+              <div class="rx-row"><span class="rx-l" />
+                <button>Add line</button>
+                <a class="btn secondary" href="/dispensary" title="Ctrl+U">Park</a>
+                {canDispense && s.lines.length > 0 && <button type="button" class="secondary" id="rx-go">Go to dispense</button>}</div>
+            </form>}
+            {draft && !s.repeatOf && <ItemFinder />}
+            {!draft && <p class="muted" style="margin:0">Dispensed {dateTime(s.dispensedAt)} by {s.dispensedBy ?? 'unknown'}. Captured by {s.createdBy ?? 'unknown'}.
+              {s.status === 'reversed' && <b class="neg"> Reversed {dateTime(s.reversedAt)} by {s.reversedBy}: {s.reverseReason}</b>}</p>}
+          </div>
+          <aside>
+            <PatientCard p={s.patient} flags={data.flags} balance={data.balance} />
+            <div class="panel rx-side"><h3>Dates</h3>
+              <dl class="rx-kv">
+                <dt>Script date</dt><dd>{date(s.rxDate)}</dd>
+                <dt>Dispensed</dt><dd>{s.dispensedAt ? dateTime(s.dispensedAt) : <span class="muted">not yet</span>}</dd>
+                <dt>Repeats until</dt><dd>{date(addDays(s.rxDate, settings.repeatValidDays))}</dd>
+                <dt>Script no.</dt><dd>{s.scriptNo ?? <span class="muted">given when dispensed</span>}</dd>
+              </dl></div>
+            <div class="panel rx-side"><h3>{s.medicalAidName ? <>Bill {s.medicalAidName} {s.memberNo}{s.dependantCode ? `/${s.dependantCode}` : ''}</> : 'Patient pays all'}</h3>
+              <dl class="rx-kv">
+                <dt>Total incl VAT</dt><dd class="n">{money(s.total)}</dd>
+                <dt>Medical aid</dt><dd class="n">{money(s.claimTotal)}</dd>
+                <dt>Patient pays</dt><dd class="n rx-total">{money(s.patientTotal)}</dd>
+              </dl></div>
+          </aside>
         </div>
-        {!draft && <p class="muted">Dispensed {dateTime(s.dispensedAt)} by {s.dispensedBy ?? 'unknown'}. Captured by {s.createdBy ?? 'unknown'}.
-          {s.status === 'reversed' && <b class="neg"> Reversed {dateTime(s.reversedAt)} by {s.reversedBy}: {s.reverseReason}</b>}</p>}
 
+        {draft && !s.repeatOf && <>
+            <div class="touch-only panel" id="rx-touch">
+              <div class="touchgrid">
+                <div>
+                  <b>Items</b>
+                  {settings.rxButtons.length
+                    ? <div class="tiles">{settings.rxButtons.map((b) => <button type="button" class={`tile c-${b.color}`} data-code={b.code}>{b.label}</button>)}</div>
+                    : <p class="hint">No item buttons yet. The owner adds them under Settings → Dispensary quick buttons. Scanning works as usual.</p>}
+                  <b>Directions</b>
+                  <div class="tiles">{data.topDirections.map((d) => <button type="button" class="tile plain" data-dir={d.code} title={d.text}>{d.code}<small>{d.text}</small></button>)}</div>
+                </div>
+                <div>
+                  <b>Typing into: <span id="pad-target">Quantity</span></b>
+                  <div class="numpad" style="margin:8px 0">
+                    {['7', '8', '9', '4', '5', '6', '1', '2', '3', 'C', '0', '⌫'].map((k) => <button type="button" data-pad={k}>{k}</button>)}
+                  </div>
+                  <div class="bigacts">
+                    <button type="button" class="secondary" data-per="units">Units</button><button type="button" class="secondary" data-per="packs">Packs</button>
+                    <button type="button" class="secondary" data-act="F3">Patient pays</button><button type="button" class="secondary" data-act="F4">Owe it</button>
+                    <button type="button" class="secondary" data-act="rep">Repeats +1</button><button type="button" class="secondary" data-act="park">Park</button>
+                    <button type="button" data-act="add">Add line</button><button type="button" data-act="dispense">Dispense</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+        </>}
         <div class="wrap"><table>
           <thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Given</th><th>Directions</th><th class="n">Days</th><th class="n">Repeats</th><th>ICD-10</th><th class="n">Item</th><th class="n">Fee</th><th class="n">Total</th>{draft && <th />}</tr></thead>
           <tbody>{s.lines.map((l) => (
@@ -425,25 +683,6 @@ export function dispensaryRoutes() {
         </table></div>
 
         {draft && !s.repeatOf && <>
-          <h2>Add an item</h2>
-          <form method="post" action={`/dispensary/scripts/${s.id}/lines`} class="grid panel" id="add-line">
-            <label style="grid-column:span 2">Item (scan, code or name)<input name="item" list="items-dl" data-items required autofocus autocomplete="off" /></label>
-            <datalist id="items-dl" />
-            <label>Quantity<span class="row"><input name="qty" type="number" min="1" step="1" required style="width:90px" />
-              <select name="per"><option value="units">units</option><option value="packs">packs</option></select></span></label>
-            <label>Give now (blank = all)<input name="supply" type="number" min="0" step="1" /></label>
-            <label style="grid-column:span 2">Directions (code or text)<input name="directions" list="dir-dl" required autocomplete="off" placeholder="e.g. 1T3D" /></label>
-            <datalist id="dir-dl">{data.directions.map((d) => <option value={d.code}>{d.text}</option>)}</datalist>
-            <label>Supply days<input name="supplyDays" type="number" min="1" value={settings.defaultSupplyDays} /></label>
-            <label>Repeats<input name="repeats" type="number" min="0" max="12" value="0" /></label>
-            <label>ICD-10<input name="icd10" placeholder="e.g. J06.9" /></label>
-            <label class="row" style="flex-direction:row"><input type="checkbox" name="noClaim" /> Patient pays for this line</label>
-            <div><button>Add line</button></div>
-            <p class="keybar" style="grid-column:1/-1">
-              <span><kbd>Enter</kbd>add line</span><span><kbd>F3</kbd>patient pays (no claim)</span><span><kbd>F4</kbd>owe it, give none now</span>
-              <span><kbd>F8</kbd>repeats</span><span><kbd>F9</kbd>patient's history</span><span><kbd>Ctrl</kbd>+<kbd>U</kbd>park, finish later</span>
-            </p>
-          </form>
           <p class="hint">Price = the item at the shop's price for the units prescribed{settings.dispensingFee ? `, plus a dispensing fee of ${money(settings.dispensingFee)} a line` : ''}. Medical aid pricing rules come with claims.</p>
         </>}
 
@@ -484,6 +723,9 @@ export function dispensaryRoutes() {
           )}
         </>}
         <script>{raw(itemPicker)}</script>
+        {draft && <div class="fbar">
+          {!s.repeatOf && <span><kbd>Enter</kbd>add line</span>}{!s.repeatOf && <span><kbd>F5</kbd>find item</span>}{!s.repeatOf && <span><kbd>F3</kbd>patient pays line</span>}{!s.repeatOf && <span><kbd>F4</kbd>owe it</span>}
+          {!s.repeatOf && <span><kbd>F8</kbd>repeats</span>}<span><kbd>F9</kbd>history</span><span><kbd>Ctrl</kbd>+<kbd>U</kbd>park</span></div>}
         {draft && <script>{raw(scriptKeys(s.patient.id))}</script>}
       </>
     ))
@@ -576,6 +818,7 @@ export function dispensaryRoutes() {
     const owed = await run(c, (tx) => listOwed(tx))
     return page(c, 'Owed items', (
       <>
+        <RxToolbar on="owed" />
         <h1>Owed items</h1>
         <LabelLink id={c.req.query('label')} />
         <p class="muted">What dispensed scripts still owe patients. Hand it over here when stock arrives, then print a label for what was given.</p>
@@ -616,6 +859,7 @@ export function dispensaryRoutes() {
     }
     return page(c, 'Register', (
       <>
+        <RxToolbar on="register" />
         <div class="row"><h1>Register of scheduled medicines</h1><span class="spacer" />
           <a class="btn secondary" href={`?from=${range.from}&to=${range.to}${itemId ? `&item=${itemId}` : ''}&format=csv`}>Download CSV</a>
           <button class="secondary" onclick="window.print()">Print</button></div>
@@ -650,6 +894,7 @@ export function dispensaryRoutes() {
     const doctors = await run(c, (tx) => listDoctors(tx, q))
     return page(c, 'Doctors', (
       <>
+        <RxToolbar on="doctors" />
         <h1>Doctors</h1>
         <form class="row panel"><input name="q" data-search value={q} placeholder="Surname or practice number" style="flex:1" /><button class="secondary">Find</button></form>
         <form method="post" action="/dispensary/doctors" class="grid panel">
@@ -711,6 +956,7 @@ export function dispensaryRoutes() {
     }))
     return page(c, 'Dispensing settings', (
       <>
+        <RxToolbar on="settings" />
         <h1>Dispensing settings</h1>
         <form method="post" action="/dispensary/settings" class="grid panel">
           <label>Dispensing fee per line, incl VAT (P)<input name="fee" type="number" step="0.01" min="0" value={d.s.dispensingFee.toFixed(2)} /></label>

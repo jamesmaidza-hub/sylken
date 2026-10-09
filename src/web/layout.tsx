@@ -38,7 +38,7 @@ header{display:flex;gap:12px;align-items:center;padding:6px 16px;position:sticky
 header .brand{font-weight:700;color:var(--accent);text-decoration:none;font-size:16px}
 header nav{display:flex;gap:2px;flex-wrap:wrap}header nav a{color:var(--ink);text-decoration:none;padding:5px 8px;border-radius:6px;white-space:nowrap}
 header nav a:hover{background:var(--chip)}header nav a.on{background:var(--accent);color:var(--accent-ink)}header nav a.on kbd{background:transparent;color:inherit;border-color:currentColor;opacity:.8}kbd{font:11px ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-right:4px;color:var(--muted)}
-header .who{margin-left:auto;color:var(--muted);font-size:13px;white-space:nowrap}
+header .who{margin-left:auto;color:var(--muted);font-size:13px;white-space:nowrap}header #touch-toggle{margin-left:auto}header #touch-toggle+.who{margin-left:4px}
 main{padding:16px;max-width:1200px;margin:0 auto}h1{font-size:20px;margin:4px 0 12px}h2{font-size:16px;margin:20px 0 8px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-bottom:12px}
 table{width:100%;border-collapse:collapse;background:var(--panel)}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
@@ -65,8 +65,72 @@ form.grid label,label.f{display:flex;flex-direction:column;gap:4px;font-size:12p
 .block{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px}.block h3{font-size:15px;margin:0 0 6px}
 table.sumtab{background:none;margin-top:6px}table.sumtab td{border:0;padding:2px 0}table.sumtab tr.t td{border-top:1px solid var(--line)}
 tfoot td{font-variant-numeric:tabular-nums}
+/* Script screen: one form on the left, patient, dates and money on the right, keys along the bottom. */
+.rx-desk{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;align-items:start}
+.rx-form{font-size:16px;padding:16px 20px}
+.rx-row{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.rx-row>label:not(.rx-l):not(.chk){color:var(--muted)}
+.rx-l{width:112px;flex:none;font-weight:600;color:var(--muted)}
+.rx-form input,.rx-form select{font-size:17px;padding:8px 10px}.rx-form .grow{flex:1;min-width:220px}.rx-form .num{width:84px}
+.rx-form button,.rx-form .btn{padding:9px 18px;font-size:16px}
+.rx-big{font-size:20px}.chk{display:flex;align-items:center;gap:6px}
+.rx-info{margin:-4px 0 12px 124px;min-height:1.45em;font-size:15px}
+.rx-instr{flex:1;min-height:46px;padding:10px 12px;border:1px dashed var(--line);border-radius:6px;font-size:17px;background:var(--bg)}
+.rx-side{padding:14px 16px}.rx-side h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.rx-kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin:0;font-size:15px}.rx-kv dt{color:var(--muted)}.rx-kv dd{margin:0}.rx-kv dd.n{text-align:right;font-variant-numeric:tabular-nums}
+.rx-total{font-size:22px;font-weight:700}.rx-allergy{margin:10px 0 0;font-size:16px}
+.fbar{position:fixed;left:0;right:0;bottom:0;z-index:15;display:flex;gap:4px 20px;flex-wrap:wrap;padding:8px 16px;background:var(--panel);border-top:1px solid var(--line);font-size:14px}
+.fbar kbd{font-size:12px}body:has(.fbar) main{padding-bottom:64px}
+.finder{width:min(980px,96vw);max-height:92vh;border:1px solid var(--line);border-radius:10px;padding:16px 20px;background:var(--panel);color:var(--ink);box-shadow:0 20px 60px rgba(0,0,0,.35)}
+.finder::backdrop{background:rgba(15,20,30,.45)}.finder>input{width:100%;font-size:18px;padding:10px 12px;margin:10px 0}
+.fd-grid{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:6px}.fd-grid table{font-size:15px}.fd-grid thead th{position:sticky;top:0;background:var(--panel)}.fd-grid tbody tr{cursor:pointer}
+.fd-tabs{display:flex;gap:4px;margin:14px 0 0;border-bottom:1px solid var(--line)}.fd-tabs button{background:none;color:var(--muted);border-radius:6px 6px 0 0;padding:8px 16px}
+.fd-tabs button.on{color:var(--ink);background:var(--bg);box-shadow:inset 0 -3px 0 var(--accent);font-weight:600}
+.fd-detail{min-height:130px;padding:12px 4px 0}
+.records{max-height:280px;overflow:auto;border:1px solid var(--line);border-radius:8px}.records thead th{position:sticky;top:0;background:var(--panel)}
+tr.cur{outline:2px solid var(--accent);outline-offset:-2px;background:color-mix(in srgb,var(--accent) 14%,transparent);font-weight:600}
+.tabs{display:flex;gap:4px;margin:16px 0 0;border-bottom:1px solid var(--line)}.tabs a{padding:9px 18px;border-radius:6px 6px 0 0;color:var(--muted);text-decoration:none;font-weight:500}
+.tabs a.on{color:var(--ink);background:var(--panel);box-shadow:inset 0 -3px 0 var(--accent);font-weight:600}section.tab{margin-top:8px}section.tab>.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
+.grid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}.items-form>.panel>.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
+@media (max-width:980px){.rx-desk{grid-template-columns:1fr}}
+@media (max-width:640px){.rx-l{width:100%}.rx-info{margin-left:0}}
+/* Touch screen layout: bigger rows, fields and buttons; screens may add big-button panels (.touch-only). */
+.toolbar{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
+.toolbar a{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:92px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);text-decoration:none;font-size:13px}
+.toolbar a:hover{border-color:var(--accent)}.toolbar a.on{border-color:var(--accent);box-shadow:inset 0 -3px 0 var(--accent)}
+.toolbar .ico{font-size:24px;line-height:1.1}
+body.touch-mode .toolbar a{min-width:110px;padding:12px;font-size:15px}body.touch-mode .toolbar .ico{font-size:30px}
+.touch-only{display:none}
+body.touch-mode{font-size:17px}
+body.touch-mode .touch-only{display:block}
+body.touch-mode input,body.touch-mode select{min-height:46px;font-size:17px}
+body.touch-mode button,body.touch-mode .btn{min-height:46px;padding:10px 18px}
+body.touch-mode th,body.touch-mode td{padding:12px 10px}
+body.touch-mode header{font-size:15px}body.touch-mode header nav a{padding:9px 8px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:8px 0}
+.tile{min-height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-weight:600;text-align:center;line-height:1.2;color:#fff;border-radius:8px;padding:6px}
+.tile small{font-weight:400;font-size:12px;opacity:.9}
+.tile.plain{background:var(--panel);color:var(--ink);border:1px solid var(--line)}
+.tile.on{outline:3px solid var(--accent);outline-offset:2px}
+.c-green{background:#18794e}.c-blue{background:#1d5fbf}.c-teal{background:#0d6b5e}.c-amber{background:#a5530a}.c-red{background:#b42318}.c-purple{background:#6941c6}.c-grey{background:#5d6676}
+.numpad{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.numpad button{min-height:58px;font-size:22px;font-weight:600;background:var(--panel);color:var(--ink);border:1px solid var(--line)}
+.bigacts{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:8px}
+.bigacts button,.bigacts a.btn{min-height:60px;font-size:17px;font-weight:600;text-align:center;display:flex;align-items:center;justify-content:center}
+.touchgrid{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;align-items:start}
+@media (max-width:900px){.touchgrid{grid-template-columns:1fr}}
 @media (max-width:640px){main{padding:12px 16px}header{gap:8px}header .who{margin-left:0}}
 `
+
+// Touch screen layout, remembered per browser. Screens add .touch-only panels for it.
+const touch = `
+(() => {
+  const k = 'sylken:touch', b = document.getElementById('touch-toggle')
+  let on = false; try { on = localStorage.getItem(k) === '1' } catch {}
+  const set = (v) => { on = v; document.body.classList.toggle('touch-mode', v); if (b) b.textContent = v ? 'Keyboard layout' : 'Touch screen'; try { localStorage.setItem(k, v ? '1' : '0') } catch {} }
+  set(on)
+  if (b) b.onclick = () => set(!on)
+})()`
 
 // Function keys work everywhere, like Compharm. "/" jumps to the search box, arrows move through result rows.
 // A screen can claim keys of its own in window.pageKeys (e.g. the script screen's F3/F4/F8/F9 and Ctrl+U).
@@ -111,6 +175,7 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
                 <a href={href} class={href === current(props.path) ? 'on' : ''}>{k && <kbd>{k}</kbd>}{label}</a>
               ))}
             </nav>
+            <button type="button" id="touch-toggle" class="secondary" style="padding:4px 10px;font-size:13px" title="Bigger buttons for a touch screen">Touch screen</button>
             <span class="who" title={`${props.user.tenantName} · ${props.user.role}`}>{props.user.name} · <a href="/logout">Log out</a></span>
           </header>
         )}
@@ -120,6 +185,7 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
           {props.children}
         </main>
         <script>{raw(keys)}</script>
+        <script>{raw(touch)}</script>
       </body>
     </html>
   )
