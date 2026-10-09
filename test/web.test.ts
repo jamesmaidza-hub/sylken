@@ -156,6 +156,7 @@ describe('web', () => {
     const touch = await (await get(scriptPath)).text()
     expect(touch).toContain('data-code="AMX500"')
     expect(touch).toContain('Amoxil 500')
+    expect(touch).toContain('id="finder"')
     expect(loc(await post(`${scriptPath}/lines`, { item: 'amoxicillin', qty: '2', per: 'packs', supply: '', directions: '1c3d', supplyDays: '10', repeats: '1', icd10: 'j06.9' })).pathname).toBe(scriptPath)
     const page = await (await get(scriptPath)).text()
     expect(page).toContain('Take ONE capsule THREE times a day')

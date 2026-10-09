@@ -88,6 +88,64 @@ const scriptKeys = (patientId: string) => `
   }
   f.item.addEventListener('change', showItem)
 
+  // Item finder pop-up.
+  const fd = document.getElementById('finder')
+  if (fd) {
+    const q = document.getElementById('fd-q'), rows = document.getElementById('fd-rows'), det = document.getElementById('fd-detail')
+    let items = [], at = -1, tab = 'general', fseq = 0, timer
+    const esc = (v) => String(v ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c])
+    const pula = (n) => 'P' + Number(n).toFixed(2)
+    const kv = (pairs) => '<dl class="rx-kv">' + pairs.filter((p) => p[1] !== null && p[1] !== '').map((p) => '<dt>' + esc(p[0]) + '</dt><dd>' + esc(p[1]) + '</dd>').join('') + '</dl>'
+    const detail = () => {
+      const it = items[at]
+      if (!it) { det.innerHTML = '<span class="muted">Pick an item to see its details.</span>'; return }
+      document.getElementById('fd-open').href = '/items/' + it.id
+      det.innerHTML = tab === 'general' ? kv([['Description', it.description], ['Stock code', it.stockCode], ['Barcodes', (it.barcodes || []).join(', ')], ['NAPPI', it.nappiCode],
+          ['Pack size', it.packSize], ['Schedule', it.schedule === null ? 'Unscheduled' : 'S' + it.schedule], ['Status', it.status + (it.statusReason ? ' (' + it.statusReason + ')' : '')]])
+        : tab === 'pricing' ? kv([['Price a pack', pula(it.retailPerPack)], ['Price a unit', it.packSize > 1 ? pula(it.retailPerPack / it.packSize) : ''],
+          ['Cost a pack', it.costPerPack === null ? '' : pula(it.costPerPack)], ['VAT', it.vatRate === null ? 'Standard' : Math.round(it.vatRate * 100) + '%']])
+        : kv([['On hand', it.onHandUnits + ' units'], ['Min', it.minUnits], ['Max', it.maxUnits], ['Shelf', (it.bins || []).join(', ')]])
+    }
+    const move = (i) => {
+      if (!items.length) return
+      at = Math.max(0, Math.min(items.length - 1, i))
+      rows.querySelectorAll('tr').forEach((r, k) => r.classList.toggle('sel', k === at))
+      const r = rows.children[at]; if (r) r.scrollIntoView({ block: 'nearest' })
+      detail()
+    }
+    const search = async () => {
+      const n = ++fseq, res = await fetch('/api/items?q=' + encodeURIComponent(q.value.trim()))
+      if (n !== fseq || !res.ok) return
+      items = await res.json()
+      rows.innerHTML = items.map((it) => '<tr><td>' + esc(it.stockCode) + '</td><td>' + esc(it.description) + (it.status !== 'active' ? ' <span class="chip">' + esc(it.status) + '</span>' : '') + '</td><td class="n">' + esc(it.packSize) +
+        '</td><td>' + (it.schedule === null ? '' : 'S' + it.schedule) + '</td><td>' + esc(it.nappiCode) + '</td><td class="n' + (it.onHandUnits <= 0 ? ' neg' : '') + '">' + it.onHandUnits +
+        '</td><td class="n">' + pula(it.retailPerPack) + '</td></tr>').join('') || '<tr><td colspan="7" class="muted">Nothing matches.</td></tr>'
+      document.getElementById('fd-count').textContent = items.length ? items.length + (items.length === 25 ? '+' : '') + ' found' : ''
+      at = -1; move(0); if (!items.length) detail()
+    }
+    const pick = () => {
+      const it = items[at]; if (!it) return
+      f.item.value = it.stockCode; fd.close(); mark(f.item); showItem(); f.qty.focus()
+    }
+    const open = () => { q.value = f.item.value.trim(); fd.showModal(); q.focus(); q.select(); search() }
+    document.getElementById('find-item').addEventListener('click', open)
+    window.pageKeys.F5 = () => { if (!fd.open) open() }
+    q.addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(search, 180) })
+    q.addEventListener('keydown', (e) => {
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); e.stopPropagation(); move(at + (e.key === 'ArrowDown' ? 1 : -1)) }
+      if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); clearTimeout(timer); pick() }
+      if (e.key === 'Escape') { e.preventDefault(); fd.close(); f.item.focus() }
+    })
+    rows.addEventListener('click', (e) => { const r = e.target.closest('tr'); if (r) move([...rows.children].indexOf(r)) })
+    rows.addEventListener('dblclick', pick)
+    fd.querySelector('.fd-tabs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-tab]'); if (!b) return
+      tab = b.dataset.tab; fd.querySelectorAll('[data-tab]').forEach((x) => x.classList.toggle('on', x === b)); detail(); q.focus()
+    })
+    document.getElementById('fd-select').addEventListener('click', pick)
+    document.getElementById('fd-cancel').addEventListener('click', () => fd.close())
+  }
+
   const go = document.getElementById('rx-go')
   const dispense = () => { const d = document.querySelector('form[action$="/dispense"]'); if (d) { d.scrollIntoView({ behavior: 'smooth' }); d.requestSubmit() } }
   if (go) go.addEventListener('click', () => { const d = document.querySelector('form[action$="/dispense"]'); if (d) { d.scrollIntoView({ behavior: 'smooth' }); const btn = d.querySelector('button'); if (btn) btn.focus({ preventScroll: true }) } })
@@ -179,6 +237,30 @@ function PatientCard({ p, flags, balance }: { p: Patient; flags: { kind: string;
       {alerts.map((a) => <div class="msg warn" style="margin:8px 0 0">{a.text}</div>)}
       {p.medicalAidMessage && <div class="hint" style="margin-top:6px">{p.medicalAidName}: {p.medicalAidMessage}</div>}
     </div>
+  )
+}
+
+/** A pop-up item finder over the script: search, arrow through the results, see the item's details, Enter puts it on the script. */
+function ItemFinder() {
+  return (
+    <dialog id="finder" class="finder" aria-label="Find an item">
+      <div class="row"><b style="font-size:18px">Find an item</b><span class="spacer" /><span class="hint" id="fd-count" /></div>
+      <input id="fd-q" type="text" placeholder="Name, stock code, barcode or NAPPI" autocomplete="off" />
+      <div class="fd-grid"><table>
+        <thead><tr><th>Code</th><th>Description</th><th class="n">Pack</th><th>Sch</th><th>NAPPI</th><th class="n">On hand</th><th class="n">Price/pack</th></tr></thead>
+        <tbody id="fd-rows" />
+      </table></div>
+      <div class="fd-tabs" role="tablist">
+        <button type="button" class="on" data-tab="general">General</button><button type="button" data-tab="pricing">Pricing</button><button type="button" data-tab="stock">Stock</button>
+      </div>
+      <div class="fd-detail" id="fd-detail"><span class="muted">Pick an item to see its details.</span></div>
+      <div class="row" style="margin-top:12px">
+        <span class="hint"><kbd>↑</kbd><kbd>↓</kbd>move <kbd>Enter</kbd>put on the script <kbd>Esc</kbd>close</span><span class="spacer" />
+        <a class="btn secondary" id="fd-open" target="_blank" href="/items">Open item record</a>
+        <button type="button" class="secondary" id="fd-cancel">Cancel</button>
+        <button type="button" id="fd-select">Select</button>
+      </div>
+    </dialog>
   )
 }
 
@@ -505,7 +587,8 @@ export function dispensaryRoutes() {
                 </>}
             {draft && !s.repeatOf && <form method="post" action={`/dispensary/scripts/${s.id}/lines`} id="add-line">
               <div class="rx-row"><label class="rx-l" for="rx-item">Item</label>
-                <input id="rx-item" name="item" list="items-dl" data-items required autofocus autocomplete="off" placeholder="Scan, or type a code or name" class="grow" /></div>
+                <input id="rx-item" name="item" list="items-dl" data-items required autofocus autocomplete="off" placeholder="Scan, or type a code or name" class="grow" />
+                <button type="button" class="secondary" id="find-item" title="F5">🔍 Find item</button></div>
               <datalist id="items-dl" />
               <div class="rx-info" id="item-info" />
               <div class="rx-row"><label class="rx-l" for="rx-qty">Quantity</label>
@@ -525,6 +608,7 @@ export function dispensaryRoutes() {
                 <a class="btn secondary" href="/dispensary" title="Ctrl+U">Park</a>
                 {canDispense && s.lines.length > 0 && <button type="button" class="secondary" id="rx-go">Go to dispense</button>}</div>
             </form>}
+            {draft && !s.repeatOf && <ItemFinder />}
             {!draft && <p class="muted" style="margin:0">Dispensed {dateTime(s.dispensedAt)} by {s.dispensedBy ?? 'unknown'}. Captured by {s.createdBy ?? 'unknown'}.
               {s.status === 'reversed' && <b class="neg"> Reversed {dateTime(s.reversedAt)} by {s.reversedBy}: {s.reverseReason}</b>}</p>}
           </div>
@@ -640,7 +724,7 @@ export function dispensaryRoutes() {
         </>}
         <script>{raw(itemPicker)}</script>
         {draft && <div class="fbar">
-          {!s.repeatOf && <span><kbd>Enter</kbd>add line</span>}{!s.repeatOf && <span><kbd>F3</kbd>patient pays line</span>}{!s.repeatOf && <span><kbd>F4</kbd>owe it</span>}
+          {!s.repeatOf && <span><kbd>Enter</kbd>add line</span>}{!s.repeatOf && <span><kbd>F5</kbd>find item</span>}{!s.repeatOf && <span><kbd>F3</kbd>patient pays line</span>}{!s.repeatOf && <span><kbd>F4</kbd>owe it</span>}
           {!s.repeatOf && <span><kbd>F8</kbd>repeats</span>}<span><kbd>F9</kbd>history</span><span><kbd>Ctrl</kbd>+<kbd>U</kbd>park</span></div>}
         {draft && <script>{raw(scriptKeys(s.patient.id))}</script>}
       </>
