@@ -44,7 +44,7 @@ sylken can only replace Compharm once dispensing, stock, the till and BOMAid cla
 - **The patient is charged for the full quantity prescribed** when the script is dispensed. What isn't handed over is owed and given later at no charge, each time with its own label.
 - **Repeats** are counted against the original script's lines and may be given until a set number of days after the script date (180 by default).
 - **Allergies are checked by the pharmacist.** sylken has no ingredient or interaction data, so it can only spot an allergy written the way an item is named. Any script for a patient with allergies or alerts asks the pharmacist to tick that they checked them.
-- **The register of scheduled medicines is read from the stock ledger**, so its balance always matches stock on hand. Which schedules go in it is a setting; none are chosen until the pharmacist confirms them.
+- **The register of scheduled medicines is read from the stock ledger**, so its balance always matches stock on hand. Which schedules go in it is a setting; none are chosen for a new pharmacy, and Friends uses schedule 1.
 - **Labels** print through the browser on a label printer, one per page, at a size set in the dispensing settings (70 × 36 mm by default).
 - **No reference data ships**: medical aids, doctors, directions and ICD-10 codes are the shop's own. ICD-10 codes are checked for shape only. A starter list of direction codes is included, written for sylken.
 
@@ -58,9 +58,9 @@ sylken can only replace Compharm once dispensing, stock, the till and BOMAid cla
 6. What must a till slip show to count as a VAT invoice for BURS? sylken prints the shop name, VAT number (set in Settings), date, items, total incl VAT and tenders.
 7. How many tills, and which slip printers and card machines? The card machine isn't linked; its batch total is entered at cash-up.
 8. Is direct banking (EFT) used at Friends, and are account customers given credit limits?
-9. Which drug schedules must go in the controlled-medicine register in Botswana, and what must each entry show? sylken records date, script number, patient name, ID and address, doctor and practice number, quantity in and out, running balance and who dispensed.
-10. What dispensing fee does the shop charge, and is it per line or per script? sylken charges per line.
-11. How long are repeats valid in Botswana? sylken uses 180 days from the script date.
-12. What must a dispensing label show by law, and what size are the shop's labels?
+9. ~~Which schedules go in the register?~~ **Answered 9 Oct 2026: schedule 1** (set in Dispensing settings for Friends). Still to confirm: what each register entry must show by law; sylken records date, script number, patient name, ID and address, doctor and practice number, quantity in and out, running balance and who dispensed.
+10. ~~What dispensing fee does the shop charge?~~ **Answered 9 Oct 2026: none.** The fee stays at P0; the setting is there for other pharmacies.
+11. ~~How long are repeats valid?~~ **Answered 9 Oct 2026: 180 days** from the script date, which is the default.
+12. What must a dispensing label show by law, and what size are the shop's labels? Not known yet; sylken prints 70 × 36 mm labels with the shop, patient, item, quantity, directions, date, script number, doctor and dispenser until someone measures a label roll.
 13. Should a script be priced from the shop's retail price, or from a separate dispensing price (cost plus a markup and fee)? sylken uses retail plus fee for now; stage 4 adds medical aid fee models.
 14. Can Compharm's patients, doctors and script history come across in a database export?
