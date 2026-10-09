@@ -85,7 +85,7 @@ export async function searchItems(
             coalesce((select array_agg(bn.name order by ib.position) from item_bins ib join bins bn on bn.id = ib.bin_id where ib.item_id = i.id), '{}') as bins
        from items i left join stock_levels s on s.item_id = i.id
       where i.status = any($1) and ${where}
-      order by (upper(i.description) like $${params.length + 2}) desc, i.description
+      order by (i.status = 'dormant'), (upper(i.description) like $${params.length + 2}) desc, i.description
       limit ${Number(limit)} offset ${Number(opts.offset ?? 0)}`,
     [statuses, ...params, `${words[0]}%`] as any[],
   )

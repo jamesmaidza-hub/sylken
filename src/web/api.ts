@@ -79,8 +79,10 @@ export function api() {
       const settings = await getSettings(tx)
       const items = await tx`
         select i.id, i.stock_code, i.description, i.retail_per_pack, i.pack_size, i.sell_loose, i.status, i.vat_rate,
+               coalesce(s.on_hand_units, 0) as on_hand_units,
                coalesce((select array_agg(b.barcode) from item_barcodes b where b.item_id = i.id), '{}') as barcodes
-          from items i where i.status in ('active','dormant') order by i.description`
+          from items i left join stock_levels s on s.item_id = i.id
+         where i.status in ('active','dormant') order by i.description`
       const accounts = await tx`
         select a.id, a.account_no, a.name, a.credit_limit,
                coalesce((select sum(e.amount) from account_entries e where e.account_id = a.id), 0) as balance
@@ -94,7 +96,7 @@ export function api() {
           id: a.id, no: a.account_no, name: a.name, balance: Number(a.balance), limit: a.credit_limit === null ? null : Number(a.credit_limit),
         })),
         items: items.map((i) => ({
-          i: i.id, c: i.stock_code, d: i.description, p: Number(i.retail_per_pack), n: i.pack_size, l: i.sell_loose,
+          i: i.id, c: i.stock_code, d: i.description, p: Number(i.retail_per_pack), n: i.pack_size, l: i.sell_loose, s: Number(i.on_hand_units),
           ...(i.barcodes.length ? { b: i.barcodes } : {}), ...(i.vat_rate !== null ? { v: Number(i.vat_rate) } : {}), ...(i.status === 'dormant' ? { z: 1 } : {}),
         })),
         at: new Date().toISOString(),

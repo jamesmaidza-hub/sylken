@@ -102,7 +102,7 @@ function PatientForm(props: { action: string; p?: Patient | null; mainMember?: P
       <label>Usual doctor<select name="doctorId"><option value=""></option>{props.doctors.map((d) => <option value={d.id} selected={p?.doctorId === d.id}>{d.name}</option>)}</select></label>
       <label>Customer account<select name="accountId"><option value="">None</option>{props.accounts.map((a) => <option value={a.id} selected={p?.accountId === a.id}>{a.name} ({a.accountNo})</option>)}</select></label>
       <label>Notes<input name="notes" value={p?.notes ?? ''} /></label>
-      {p && <label class="row" style="flex-direction:row"><input type="checkbox" name="inactive" checked={!p.active} /> Inactive (moved away, died)</label>}
+      {p?.id && <label class="row" style="flex-direction:row"><input type="checkbox" name="inactive" checked={!p.active} /> Inactive (moved away, died)</label>}
       <div><button>{props.submit}</button></div>
     </form>
   )

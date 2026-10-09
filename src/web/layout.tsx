@@ -21,7 +21,7 @@ const nav: [string, string, string][] = [
   ['F3', 'Receive', '/receiving'],
   ['F4', 'Stock take', '/stocktakes'],
   ['F5', 'Dispensary', '/dispensary'],
-  ['F6', 'Order (min/max)', '/reports/minmax'],
+  ['F6', 'Order', '/reports/minmax'],
   ['F7', 'Reports', '/reports'],
   ['F8', 'Settings', '/settings'],
   ['F9', 'Till', '/till/'],
@@ -33,20 +33,22 @@ const nav: [string, string, string][] = [
 const css = `
 :root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2330;--muted:#5d6676;--line:#dde1e7;--accent:#0d6b5e;--accent-ink:#fff;--warn:#a5530a;--bad:#b42318;--good:#18794e;--chip:#eef1f4}
 @media (prefers-color-scheme:dark){:root{--bg:#14171c;--panel:#1c2027;--ink:#e6e9ee;--muted:#9aa3b2;--line:#2e343e;--accent:#3fb6a2;--accent-ink:#0b1512;--warn:#e7a35b;--bad:#f07167;--good:#5fd39a;--chip:#262b34}}
-*{box-sizing:border-box}body{margin:0;font:14px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
-header{display:flex;gap:16px;align-items:center;padding:8px 16px;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
+*{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
+header{display:flex;gap:12px;align-items:center;padding:6px 16px;position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
 header .brand{font-weight:700;color:var(--accent);text-decoration:none;font-size:16px}
-header nav{display:flex;gap:4px;flex-wrap:wrap}header nav a{color:var(--ink);text-decoration:none;padding:4px 8px;border-radius:6px}
-header nav a:hover,header nav a.on{background:var(--chip)}kbd{font:11px ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-right:4px;color:var(--muted)}
-header .who{margin-left:auto;color:var(--muted);font-size:13px}
+header nav{display:flex;gap:2px;flex-wrap:wrap}header nav a{color:var(--ink);text-decoration:none;padding:5px 8px;border-radius:6px;white-space:nowrap}
+header nav a:hover{background:var(--chip)}header nav a.on{background:var(--accent);color:var(--accent-ink)}header nav a.on kbd{background:transparent;color:inherit;border-color:currentColor;opacity:.8}kbd{font:11px ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-right:4px;color:var(--muted)}
+header .who{margin-left:auto;color:var(--muted);font-size:13px;white-space:nowrap}
 main{padding:16px;max-width:1200px;margin:0 auto}h1{font-size:20px;margin:4px 0 12px}h2{font-size:16px;margin:20px 0 8px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-bottom:12px}
 table{width:100%;border-collapse:collapse;background:var(--panel)}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.02em}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
-tr.sel{outline:2px solid var(--accent);outline-offset:-2px}tbody tr:hover{background:var(--chip)}
+tr.sel{outline:2px solid var(--accent);outline-offset:-2px;background:color-mix(in srgb,var(--accent) 10%,transparent)}tbody tr:hover{background:var(--chip)}tr[data-href]{cursor:pointer}tr.dim td{color:var(--muted)}tr.dim td a{color:var(--muted)}
 .wrap{overflow-x:auto}a{color:var(--accent)}
 input,select,textarea,button{font:inherit;color:inherit}input,select,textarea{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:6px 8px;min-width:0}
-input:focus,select:focus{outline:2px solid var(--accent);border-color:transparent}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--accent);border-color:transparent}
+button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
+button:hover,.btn:hover{filter:brightness(1.08)}
 button,.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:6px;padding:7px 14px;cursor:pointer;text-decoration:none;display:inline-block}
 button.secondary,.btn.secondary{background:var(--chip);color:var(--ink)}button.danger{background:var(--bad);color:#fff}
 form.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
@@ -105,7 +107,7 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
                 <a href={href} class={href === current(props.path) ? 'on' : ''}>{k && <kbd>{k}</kbd>}{label}</a>
               ))}
             </nav>
-            <span class="who">{props.user.tenantName} · {props.user.name} ({props.user.role}) · <a href="/logout">Log out</a></span>
+            <span class="who" title={`${props.user.tenantName} · ${props.user.role}`}>{props.user.name} · <a href="/logout">Log out</a></span>
           </header>
         )}
         <main>

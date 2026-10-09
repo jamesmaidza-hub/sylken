@@ -57,7 +57,7 @@ export function itemRoutes() {
           <thead><tr><th>Code</th><th>Description</th><th class="n">Pack</th><th class="n">On hand</th><th class="n">Cost</th><th class="n">Retail</th><th>Bins</th><th>Status</th></tr></thead>
           <tbody>
             {items.map((i) => (
-              <tr data-href={`/items/${i.id}`}>
+              <tr data-href={`/items/${i.id}`} class={i.status === 'dormant' ? 'dim' : ''}>
                 <td>{i.stockCode}</td><td><a href={`/items/${i.id}`}>{i.description || <em class="muted">no description</em>}</a></td>
                 <td class="n">{i.packSize}</td><td class={`n ${i.onHandUnits < 0 ? 'neg' : ''}`}>{qty(i.onHandUnits, i.packSize)}</td>
                 <td class="n">{money(i.costPerPack)}</td><td class="n">{money(i.retailPerPack)}</td>
