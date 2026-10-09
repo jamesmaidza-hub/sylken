@@ -37,6 +37,13 @@ export function settingsRoutes() {
           <div><button>Save till buttons</button></div>
         </form>
         <p class="hint">These show on the till's touch layout, so the items sold most are one tap away.</p>
+        <h2>Dispensary quick buttons</h2>
+        <form method="post" action="/settings/rx-buttons" class="panel" style="display:grid;gap:8px">
+          <label class="f">Same layout: stock code or barcode, label, colour
+            <textarea name="buttons" rows={8} style="font-family:ui-monospace,monospace" placeholder={'6009695240702, Augmentin 625, blue'}>{s.rxButtons.map((b) => `${b.code}, ${b.label}, ${b.color}`).join('\n')}</textarea></label>
+          <div><button>Save dispensary buttons</button></div>
+        </form>
+        <p class="hint">These show on the script screen's touch layout, beside the most used directions.</p>
         <form method="post" action="/settings/reprice" class="panel row">
           <span>Re-price every active item from its cost using the rule above.</span><span class="spacer" />
           <button class="danger">Re-price all items</button>
@@ -74,6 +81,17 @@ export function settingsRoutes() {
       return buttons.length
     })
     return back(c, '/settings', { ok: `${n} till buttons saved. Reload the till to see them.` })
+  })
+
+  r.post('/rx-buttons', async (c) => {
+    requireRole(c, ['owner'])
+    const b = await c.req.parseBody()
+    const n = await run(c, async (tx) => {
+      const buttons = await parseTillButtons(tx, String(b.buttons ?? ''), findByCode)
+      await updateSettings(tx, { rxButtons: buttons }, c.get('user').userId)
+      return buttons.length
+    })
+    return back(c, '/settings', { ok: `${n} dispensary buttons saved` })
   })
 
   r.post('/reprice', async (c) => {

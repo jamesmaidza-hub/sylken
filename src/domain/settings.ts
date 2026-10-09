@@ -24,6 +24,7 @@ export interface Settings {
   labelFooter: string | null
   cashRounding: number
   tillButtons: TillButton[]
+  rxButtons: TillButton[]
 }
 
 /** A quick-sale button on the till's touch layout. */
@@ -55,6 +56,7 @@ export async function getSettings(tx: Tx): Promise<Settings> {
     labelFooter: s.label_footer,
     cashRounding: num(s.cash_rounding),
     tillButtons: (s.till_buttons ?? []) as TillButton[],
+    rxButtons: (s.rx_buttons ?? []) as TillButton[],
   }
 }
 
@@ -80,11 +82,12 @@ const columns: Record<keyof Settings, string> = {
   labelFooter: 'label_footer',
   cashRounding: 'cash_rounding',
   tillButtons: 'till_buttons',
+  rxButtons: 'rx_buttons',
 }
 
 export async function updateSettings(tx: Tx, patch: Partial<Settings>, userId?: string) {
   const row: Record<string, unknown> = {}
-  for (const [k, v] of Object.entries(patch)) if (v !== undefined) row[columns[k as keyof Settings]] = k === 'tillButtons' ? tx.json(v as any) : v
+  for (const [k, v] of Object.entries(patch)) if (v !== undefined) row[columns[k as keyof Settings]] = k === 'tillButtons' || k === 'rxButtons' ? tx.json(v as any) : v
   if (!Object.keys(row).length) return
   await tx`update tenant_settings set ${tx(row)}, updated_at = now()`
   await tx`insert into audit_log (tenant_id, user_id, action, entity, detail)

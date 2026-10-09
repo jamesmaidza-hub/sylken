@@ -59,7 +59,47 @@ const scriptKeys = (patientId: string) => `
     F4: () => { f.supply.value = '0'; mark(f.supply) },
     F8: () => { f.repeats.focus(); f.repeats.select(); mark(f.repeats) },
   })
+
+  // Touch layout: tiles fill the form, the number pad types into the last number box tapped.
+  const t = document.getElementById('rx-touch')
+  if (!t) return
+  const names = { qty: 'Quantity', supply: 'Give now', repeats: 'Repeats', supplyDays: 'Supply days' }
+  let target = f.qty
+  for (const n of Object.keys(names)) f[n].addEventListener('focus', () => { target = f[n]; document.getElementById('pad-target').textContent = names[n] })
+  t.addEventListener('click', (e) => {
+    const b = e.target.closest('button'); if (!b) return
+    if (b.dataset.code) { f.item.value = b.dataset.code; mark(f.item); target = f.qty; f.qty.value = ''; document.getElementById('pad-target').textContent = names.qty }
+    if (b.dataset.dir) { f.directions.value = b.dataset.dir; mark(f.directions); t.querySelectorAll('[data-dir]').forEach((x) => x.classList.toggle('on', x === b)) }
+    if (b.dataset.pad) { const k = b.dataset.pad; target.value = k === 'C' ? '' : k === '⌫' ? target.value.slice(0, -1) : target.value + k; mark(target) }
+    if (b.dataset.per) { f.per.value = b.dataset.per; mark(f.per) }
+    const a = b.dataset.act
+    if (a === 'F3' || a === 'F4') window.pageKeys[a]()
+    if (a === 'rep') { f.repeats.value = String((Number(f.repeats.value) || 0) + 1); mark(f.repeats) }
+    if (a === 'park') window.pageKeys['Ctrl+u']()
+    if (a === 'add') f.requestSubmit()
+    if (a === 'dispense') { const d = document.querySelector('form[action$="/dispense"]'); if (d) { d.scrollIntoView({ behavior: 'smooth' }); d.requestSubmit() } }
+  })
 })()`
+
+/** A row of big picture buttons across the top of the dispensary screens. */
+function RxToolbar({ on, patientId }: { on?: string; patientId?: string }) {
+  const tools: [string, string, string, string][] = [
+    ['find', '🔍', 'Find patient', '/dispensary'],
+    ['new', '👤', 'New patient', '/dispensary/patients/new'],
+    ...(patientId ? [['history', '📋', 'History', `/dispensary/patients/${patientId}#scripts`] as [string, string, string, string]] : []),
+    ['owed', '📦', 'Owed items', '/dispensary/owed'],
+    ['book', '📖', 'Script book', '/dispensary/scripts'],
+    ['register', '🔒', 'Register', '/dispensary/register'],
+    ['doctors', '🩺', 'Doctors', '/dispensary/doctors'],
+    ['till', '🧾', 'Till', '/till/'],
+    ['settings', '⚙️', 'Settings', '/dispensary/settings'],
+  ]
+  return (
+    <nav class="toolbar">{tools.map(([k, icon, label, href]) => (
+      <a href={href} class={k === on ? 'on' : ''}><span class="ico" aria-hidden="true">{icon}</span>{label}</a>
+    ))}</nav>
+  )
+}
 
 function PatientPanel({ p, flags }: { p: Patient; flags?: { kind: string; text: string; detail: string | null }[] }) {
   const age = ageOn(p.dateOfBirth)
@@ -142,13 +182,8 @@ export function dispensaryRoutes() {
     }))
     return page(c, 'Dispensary', (
       <>
-        <div class="row"><h1>Dispensary</h1><span class="spacer" />
-          <a class="btn secondary" href="/dispensary/scripts">Script book</a>
-          <a class="btn secondary" href="/dispensary/owed">Owed items ({owed.length})</a>
-          <a class="btn secondary" href="/dispensary/register">Register</a>
-          <a class="btn secondary" href="/dispensary/doctors">Doctors</a>
-          <a class="btn secondary" href="/dispensary/settings">Dispensing settings</a>
-        </div>
+        <RxToolbar on="find" />
+        <div class="row"><h1>Dispensary</h1><span class="spacer" />{owed.length > 0 && <a href="/dispensary/owed">{owed.length} owed item{owed.length === 1 ? '' : 's'} waiting</a>}</div>
         <form class="row panel">
           <input name="q" data-search value={q} placeholder="Patient surname (and first name), ID, member number or phone  ( / )" style="flex:1" autofocus />
           <button>Find</button>
@@ -198,6 +233,7 @@ export function dispensaryRoutes() {
     const seed = c.req.query('surname') ? ({ surname: c.req.query('surname')!.toUpperCase() } as Patient) : null
     return page(c, 'New patient', (
       <>
+        <RxToolbar on="new" />
         <h1>{data.main ? `New dependant of ${data.main.name}` : 'New patient'}</h1>
         {data.main && <p class="muted">Dependants use {data.main.name}'s medical aid ({data.main.medicalAidName ?? 'none'} {data.main.memberNo ?? ''}).</p>}
         <PatientForm action="/dispensary/patients" p={seed} mainMember={data.main} aids={data.aids} doctors={data.doctors} accounts={data.accounts} submit="Add patient" />
@@ -228,6 +264,7 @@ export function dispensaryRoutes() {
     const today = new Date().toISOString().slice(0, 10)
     return page(c, p.name, (
       <>
+        <RxToolbar patientId={p.id} />
         <h1>{p.name}{!p.active && <span class="st-dormant"> (inactive)</span>}</h1>
         <PatientPanel p={p} flags={data.flags} />
         <h2>New script</h2>
@@ -336,6 +373,7 @@ export function dispensaryRoutes() {
     const sum = (f: (s: (typeof rows)[number]) => number) => live.reduce((a, s) => a + f(s), 0)
     return page(c, 'Script book', (
       <>
+        <RxToolbar on="book" />
         <div class="row"><h1>Script book</h1><span class="spacer" /><a class="btn secondary" href={`?from=${range.from}&to=${range.to}&format=csv`}>Download CSV</a></div>
         <RangeForm {...range} />
         <p class="muted">{live.length} scripts dispensed{rows.length > live.length ? `, ${rows.length - live.length} reversed` : ''}: {money(sum((s) => s.total))} in total,
@@ -362,8 +400,13 @@ export function dispensaryRoutes() {
       if (!s) throw new DomainError('unknown script', 'not_found', 404)
       const settings = await getSettings(tx)
       const flags = await patientFlags(tx, s.patient.id)
+      // The directions used most, for the touch layout's tiles.
+      const topDirections = s.status === 'draft' ? await tx`
+        select d.code, d.text from directions d left join script_lines l on l.directions = d.text
+         group by d.code, d.text order by count(l.id) desc, d.code limit 16` : []
       return { s, settings, flags, warnings: s.status === 'draft' ? scriptWarnings(s, flags, settings) : [],
-        doctors: await listDoctors(tx, '', { activeOnly: true }), directions: await listDirections(tx) }
+        doctors: await listDoctors(tx, '', { activeOnly: true }), directions: await listDirections(tx),
+        topDirections: topDirections.map((d) => ({ code: d.code as string, text: d.text as string })) }
     })
     const { s, warnings, settings } = data
     const draft = s.status === 'draft'
@@ -374,6 +417,7 @@ export function dispensaryRoutes() {
     const title = draft ? (s.repeatOf ? `Repeat of script ${s.repeatOf.scriptNo}` : 'New script') : `Script ${s.scriptNo}`
     return page(c, title, (
       <>
+        <RxToolbar patientId={s.patient.id} />
         <div class="row">
           <h1>{title} {statusChip(s.status)}</h1><span class="spacer" />
           {s.status === 'dispensed' && <a class="btn" href={`/dispensary/scripts/${s.id}/labels`} target="_blank">Print labels</a>}
@@ -426,6 +470,30 @@ export function dispensaryRoutes() {
 
         {draft && !s.repeatOf && <>
           <h2>Add an item</h2>
+          <div class="touch-only panel" id="rx-touch">
+            <div class="touchgrid">
+              <div>
+                <b>Items</b>
+                {settings.rxButtons.length
+                  ? <div class="tiles">{settings.rxButtons.map((b) => <button type="button" class={`tile c-${b.color}`} data-code={b.code}>{b.label}</button>)}</div>
+                  : <p class="hint">No item buttons yet. The owner adds them under Settings → Dispensary quick buttons. Scanning works as usual.</p>}
+                <b>Directions</b>
+                <div class="tiles">{data.topDirections.map((d) => <button type="button" class="tile plain" data-dir={d.code} title={d.text}>{d.code}<small>{d.text}</small></button>)}</div>
+              </div>
+              <div>
+                <b>Typing into: <span id="pad-target">Quantity</span></b>
+                <div class="numpad" style="margin:8px 0">
+                  {['7', '8', '9', '4', '5', '6', '1', '2', '3', 'C', '0', '⌫'].map((k) => <button type="button" data-pad={k}>{k}</button>)}
+                </div>
+                <div class="bigacts">
+                  <button type="button" class="secondary" data-per="units">Units</button><button type="button" class="secondary" data-per="packs">Packs</button>
+                  <button type="button" class="secondary" data-act="F3">Patient pays</button><button type="button" class="secondary" data-act="F4">Owe it</button>
+                  <button type="button" class="secondary" data-act="rep">Repeats +1</button><button type="button" class="secondary" data-act="park">Park</button>
+                  <button type="button" data-act="add">Add line</button><button type="button" data-act="dispense">Dispense</button>
+                </div>
+              </div>
+            </div>
+          </div>
           <form method="post" action={`/dispensary/scripts/${s.id}/lines`} class="grid panel" id="add-line">
             <label style="grid-column:span 2">Item (scan, code or name)<input name="item" list="items-dl" data-items required autofocus autocomplete="off" /></label>
             <datalist id="items-dl" />
@@ -576,6 +644,7 @@ export function dispensaryRoutes() {
     const owed = await run(c, (tx) => listOwed(tx))
     return page(c, 'Owed items', (
       <>
+        <RxToolbar on="owed" />
         <h1>Owed items</h1>
         <LabelLink id={c.req.query('label')} />
         <p class="muted">What dispensed scripts still owe patients. Hand it over here when stock arrives, then print a label for what was given.</p>
@@ -616,6 +685,7 @@ export function dispensaryRoutes() {
     }
     return page(c, 'Register', (
       <>
+        <RxToolbar on="register" />
         <div class="row"><h1>Register of scheduled medicines</h1><span class="spacer" />
           <a class="btn secondary" href={`?from=${range.from}&to=${range.to}${itemId ? `&item=${itemId}` : ''}&format=csv`}>Download CSV</a>
           <button class="secondary" onclick="window.print()">Print</button></div>
@@ -650,6 +720,7 @@ export function dispensaryRoutes() {
     const doctors = await run(c, (tx) => listDoctors(tx, q))
     return page(c, 'Doctors', (
       <>
+        <RxToolbar on="doctors" />
         <h1>Doctors</h1>
         <form class="row panel"><input name="q" data-search value={q} placeholder="Surname or practice number" style="flex:1" /><button class="secondary">Find</button></form>
         <form method="post" action="/dispensary/doctors" class="grid panel">
@@ -711,6 +782,7 @@ export function dispensaryRoutes() {
     }))
     return page(c, 'Dispensing settings', (
       <>
+        <RxToolbar on="settings" />
         <h1>Dispensing settings</h1>
         <form method="post" action="/dispensary/settings" class="grid panel">
           <label>Dispensing fee per line, incl VAT (P)<input name="fee" type="number" step="0.01" min="0" value={d.s.dispensingFee.toFixed(2)} /></label>
