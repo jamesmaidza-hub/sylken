@@ -65,6 +65,24 @@ form.grid label,label.f{display:flex;flex-direction:column;gap:4px;font-size:12p
 .block{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px}.block h3{font-size:15px;margin:0 0 6px}
 table.sumtab{background:none;margin-top:6px}table.sumtab td{border:0;padding:2px 0}table.sumtab tr.t td{border-top:1px solid var(--line)}
 tfoot td{font-variant-numeric:tabular-nums}
+/* Script screen: one form on the left, patient, dates and money on the right, keys along the bottom. */
+.rx-desk{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:12px;align-items:start}
+.rx-form{font-size:16px;padding:16px 20px}
+.rx-row{display:flex;gap:8px 12px;align-items:center;flex-wrap:wrap;margin:0 0 12px}
+.rx-row>label:not(.rx-l):not(.chk){color:var(--muted)}
+.rx-l{width:112px;flex:none;font-weight:600;color:var(--muted)}
+.rx-form input,.rx-form select{font-size:17px;padding:8px 10px}.rx-form .grow{flex:1;min-width:220px}.rx-form .num{width:84px}
+.rx-form button,.rx-form .btn{padding:9px 18px;font-size:16px}
+.rx-big{font-size:20px}.chk{display:flex;align-items:center;gap:6px}
+.rx-info{margin:-4px 0 12px 124px;min-height:1.45em;font-size:15px}
+.rx-instr{flex:1;min-height:46px;padding:10px 12px;border:1px dashed var(--line);border-radius:6px;font-size:17px;background:var(--bg)}
+.rx-side{padding:14px 16px}.rx-side h3{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+.rx-kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;margin:0;font-size:15px}.rx-kv dt{color:var(--muted)}.rx-kv dd{margin:0}.rx-kv dd.n{text-align:right;font-variant-numeric:tabular-nums}
+.rx-total{font-size:22px;font-weight:700}.rx-allergy{margin:10px 0 0;font-size:16px}
+.fbar{position:fixed;left:0;right:0;bottom:0;z-index:15;display:flex;gap:4px 20px;flex-wrap:wrap;padding:8px 16px;background:var(--panel);border-top:1px solid var(--line);font-size:14px}
+.fbar kbd{font-size:12px}body:has(.fbar) main{padding-bottom:64px}
+@media (max-width:980px){.rx-desk{grid-template-columns:1fr}}
+@media (max-width:640px){.rx-l{width:100%}.rx-info{margin-left:0}}
 /* Touch screen layout: bigger rows, fields and buttons; screens may add big-button panels (.touch-only). */
 .toolbar{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
 .toolbar a{display:flex;flex-direction:column;align-items:center;gap:2px;min-width:92px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--panel);color:var(--ink);text-decoration:none;font-size:13px}
