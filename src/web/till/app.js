@@ -622,6 +622,7 @@
       user = cat.user
       save('catalogue', cat)
       index()
+      quickButtons()
       setOnline(true)
       if (tillId && !cat.tills.some((t) => t.id === tillId)) { tillId = null; save('till', null) }
       header()
@@ -632,6 +633,79 @@
   }
 
   function setOnline(v) { online = v; header() }
+
+  async function clearSale() {
+    if (!cart.lines.length) return
+    const v = await ask(`<h2>Clear this sale?</h2><p>${cart.lines.length} line(s), ${money(totals().total)}</p>${buttons('Clear sale')}`)
+    if (v) { cart = newCart(cart.kind); sel = -1; render() }
+  }
+
+  // ------------------------------------------------------------ touch screen layout
+
+  // Big buttons for a touch screen: the shop's quick-sale items, a number pad and the main
+  // actions. A number typed on the pad before an item button sells that many packs.
+  let touch = load('touch', null)
+  if (touch === null) touch = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches)
+
+  function setTouch(v) {
+    touch = v
+    save('touch', v)
+    document.body.classList.toggle('touch-mode', v)
+    $('touch-toggle').textContent = v ? 'Keyboard layout' : 'Touch screen'
+    $('scan').inputMode = v ? 'none' : 'text'
+    quickButtons()
+  }
+
+  function quickButtons() {
+    const list = (cat && cat.tenant.buttons) || []
+    $('quick').innerHTML = list.length
+      ? list.map((b, i) => { const it = byCode.get(b.code.toUpperCase()); return `<button type="button" class="qi c-${esc(b.color)}" data-q="${i}" ${it ? '' : 'disabled'}>${esc(b.label)}${it ? `<small>${money(it.p)}</small>` : ''}</button>` }).join('')
+      : '<p class="muted">No quick buttons yet. The owner adds them in the back office under Settings.</p>'
+  }
+
+  /** A whole number typed on the pad, or null. */
+  function padNumber() { const v = $('scan').value.trim(); return /^\d+(\.\d+)?$/.test(v) && Number(v) > 0 ? Number(v) : null }
+
+  async function quickSale(i) {
+    const b = cat.tenant.buttons[i]
+    const it = b && byCode.get(b.code.toUpperCase())
+    if (!it) return
+    const packs = padNumber() || 1
+    if (!(await ensureRun())) return
+    banner('')
+    addItem(it, packs)
+    $('scan').value = ''
+    results = []
+    showResults()
+  }
+
+  function setQtyFromPad() {
+    const n = padNumber()
+    const l = cart.lines[sel]
+    if (n === null || !l) { changeQty(); return }
+    if (scriptLine(l)) return
+    const units = Math.round(n * l.n)
+    const it = cat.items.find((x) => x.i === l.i) || { l: false }
+    if (!it.l && units % l.n !== 0) { banner(`${esc(l.d)} is only sold in whole packs.`, true); return }
+    l.units = (cart.kind === 'refund' ? -1 : 1) * units
+    reprice(l)
+    $('scan').value = ''
+    render()
+  }
+
+  $('touch-toggle').addEventListener('click', () => setTouch(!touch))
+  $('quick').addEventListener('click', (e) => { const b = e.target.closest('[data-q]'); if (b) quickSale(Number(b.dataset.q)) })
+  document.querySelector('.pad').addEventListener('click', (e) => {
+    const b = e.target.closest('button')
+    if (!b || modalDone) return
+    const scan = $('scan')
+    const k = b.dataset.k
+    if (k === 'C') { scan.value = ''; results = []; showResults() }
+    else if (k === 'enter') onScanEnter()
+    else if (k) scan.value += k
+    const actions = { qty: setQtyFromPad, price: changePrice, void: removeLine, voidall: clearSale, script: addScript, refund: toggleRefund, reprint: printSlip, pay }
+    if (b.dataset.a) actions[b.dataset.a]()
+  })
 
   // ------------------------------------------------------------ keys
 
@@ -651,10 +725,7 @@
     if (k === 'Escape') {
       e.preventDefault()
       if (results.length) { results = []; showResults(); scan.value = ''; return }
-      if (cart.lines.length) {
-        const v = await ask(`<h2>Clear this sale?</h2><p>${cart.lines.length} line(s), ${money(totals().total)}</p>${buttons('Clear sale')}`)
-        if (v) { cart = newCart(cart.kind); sel = -1; render() }
-      }
+      clearSale()
       return
     }
     if (inScan && results.length && (k === 'ArrowDown' || k === 'ArrowUp')) {
@@ -697,6 +768,7 @@
   // ------------------------------------------------------------ start
 
   index()
+  setTouch(touch)
   render()
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/till/sw.js', { scope: '/till/' }).catch(() => {})
   ;(async () => {
