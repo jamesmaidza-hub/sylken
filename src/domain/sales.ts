@@ -25,7 +25,7 @@ export function shopToday(timezone: string, now = new Date()): string {
 }
 
 /** Start of `from` and start of the day after `to`, in the shop's time zone, as instants. */
-export async function bounds(tx: Tx, r: DayRange) {
+async function bounds(tx: Tx, r: DayRange) {
   checkRange(r)
   const { timezone } = await getSettings(tx)
   const [b] = await tx`

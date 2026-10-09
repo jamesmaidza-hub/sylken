@@ -76,7 +76,6 @@ function tillPage(c: Ctx) {
               <div id="last" class="last" hidden></div>
               <dl class="keys">
                 <dt>F5</dt><dd>Pay</dd>
-                <dt>F2</dt><dd>Script by number</dd>
                 <dt>F4</dt><dd>Quantity</dd>
                 <dt>F6</dt><dd>Change price</dd>
                 <dt>Del</dt><dd>Remove line</dd>
