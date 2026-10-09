@@ -59,7 +59,8 @@ form.grid label,label.f{display:flex;flex-direction:column;gap:4px;font-size:12p
 .msg{padding:8px 12px;border-radius:6px;margin-bottom:12px}.msg.err{background:color-mix(in srgb,var(--bad) 15%,transparent);color:var(--bad)}.msg.ok{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}.msg.warn{background:color-mix(in srgb,var(--warn) 15%,transparent);color:var(--warn)}
 .stats{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:12px}.stat{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px}
 .stat b{display:block;font-size:22px}a.stat{text-decoration:none;color:inherit}a.stat:hover{border-color:var(--accent)}.stat span{color:var(--muted);font-size:12px}
-.muted{color:var(--muted)}.neg{color:var(--bad)}.pos{color:var(--good)}.hint{color:var(--muted);font-size:12px}
+.muted{color:var(--muted)}.keybar{display:flex;gap:4px 14px;flex-wrap:wrap;font-size:13px;color:var(--muted);margin:6px 0 0}
+@keyframes flash{from{background:color-mix(in srgb,var(--accent) 30%,transparent)}to{background:transparent}}.flash{animation:flash .8s ease-out}.neg{color:var(--bad)}.pos{color:var(--good)}.hint{color:var(--muted);font-size:12px}
 .blocks{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:12px;margin-top:12px}
 .block{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px}.block h3{font-size:15px;margin:0 0 6px}
 table.sumtab{background:none;margin-top:6px}table.sumtab td{border:0;padding:2px 0}table.sumtab tr.t td{border-top:1px solid var(--line)}
@@ -68,8 +69,11 @@ tfoot td{font-variant-numeric:tabular-nums}
 `
 
 // Function keys work everywhere, like Compharm. "/" jumps to the search box, arrows move through result rows.
+// A screen can claim keys of its own in window.pageKeys (e.g. the script screen's F3/F4/F8/F9 and Ctrl+U).
 const keys = `
 document.addEventListener('keydown',e=>{
+  const own=window.pageKeys&&window.pageKeys[(e.ctrlKey?'Ctrl+':'')+(e.key.length===1?e.key.toLowerCase():e.key)];
+  if(own){e.preventDefault();own(e);return}
   const map={F2:'/items',F3:'/receiving',F4:'/stocktakes',F5:'/dispensary',F6:'/reports/minmax',F7:'/reports',F8:'/settings',F9:'/till/',F10:'/cashup'};
   if(map[e.key]){e.preventDefault();location.href=map[e.key];return}
   const t=e.target, typing=t&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT');
@@ -79,7 +83,7 @@ document.addEventListener('keydown',e=>{
   if(e.key==='ArrowDown'||e.key==='ArrowUp'){if(typing&&!t.hasAttribute('data-search'))return;e.preventDefault();
     if(i>=0)rows[i].classList.remove('sel');i=e.key==='ArrowDown'?Math.min(i+1,rows.length-1):Math.max(i-1,0);
     rows[i].classList.add('sel');rows[i].scrollIntoView({block:'nearest'})}
-  if(e.key==='Enter'&&i>=0&&(!typing||t.hasAttribute('data-search'))){e.preventDefault();location.href=rows[i].dataset.href}
+  if(e.key==='Enter'&&i>=0&&(!typing||t.hasAttribute('data-search'))&&!(t&&t.closest&&t.closest('button,a'))){e.preventDefault();location.href=rows[i].dataset.href}
 });
 document.addEventListener('click',e=>{const r=e.target.closest('tr[data-href]');if(r&&!e.target.closest('a,button,input'))location.href=r.dataset.href});
 `
