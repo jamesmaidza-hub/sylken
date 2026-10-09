@@ -39,7 +39,7 @@ export function vatIn(amountIncl: number, rate: number): number {
 
 const cents = (n: number) => Math.round(n * 100)
 
-async function nextNumber(tx: Tx, name: string): Promise<number> {
+export async function nextNumber(tx: Tx, name: string): Promise<number> {
   const [r] = await tx`
     insert into tenant_counters (tenant_id, name, value) values (current_setting('app.tenant_id')::uuid, ${name}, 1)
     on conflict (tenant_id, name) do update set value = tenant_counters.value + 1
@@ -105,6 +105,7 @@ export interface SaleLineInput {
   qtyUnits: number            // negative on a refund
   listTotal: number           // at the price the till showed
   lineTotal: number           // what was charged, incl VAT
+  scriptLineId?: string | null  // a line of a dispensed script: its stock left at dispensing
 }
 
 export interface PaymentInput {
@@ -123,6 +124,7 @@ export interface SaleInput {
   medicalAid?: string | null
   memberNo?: string | null
   cashTendered?: number | null
+  scriptId?: string | null     // paying for a dispensed script
   rounding?: number | null    // cash rounding taken on the sale: payments = lines + rounding
   lines: SaleLineInput[]
   payments: PaymentInput[]
@@ -183,6 +185,18 @@ export async function recordSale(tx: Tx, s: SaleInput, opts: { userId?: string |
     const [orig] = await tx`select id from sales where id = ${s.refundOf} and kind = 'sale'`
     if (!orig) throw new DomainError('the sale being refunded was not found', 'not_found', 404)
   }
+  const scriptLines = s.lines.filter((l) => l.scriptLineId)
+  if (scriptLines.length && !s.scriptId) throw new DomainError('script lines need the script they belong to')
+  if (s.scriptId) {
+    const [script] = await tx`select id from scripts where id = ${s.scriptId} and status <> 'draft'`
+    if (!script) throw new DomainError('the script being paid for was not found or is not dispensed', 'not_found', 404)
+    const ids = scriptLines.map((l) => l.scriptLineId!)
+    const found = await tx`select id, item_id from script_lines where script_id = ${s.scriptId} and id = any(${ids}::uuid[])`
+    const itemOf = new Map(found.map((f) => [f.id as string, f.item_id as string]))
+    for (const l of scriptLines) {
+      if (itemOf.get(l.scriptLineId!) !== l.itemId) throw new DomainError('a script line does not belong to the script being paid for')
+    }
+  }
 
   const settings = await getSettings(tx)
   const ids = [...new Set(s.lines.map((l) => l.itemId))]
@@ -195,7 +209,7 @@ export async function recordSale(tx: Tx, s: SaleInput, opts: { userId?: string |
     const packCost = numOrNull(it.avg_cost_per_pack) ?? numOrNull(it.cost_per_pack)
     const lineTotal = round2(l.lineTotal)
     return {
-      lineNo: n + 1, itemId: l.itemId, qtyUnits: l.qtyUnits, listTotal: round2(l.listTotal), lineTotal, rate,
+      lineNo: n + 1, itemId: l.itemId, qtyUnits: l.qtyUnits, listTotal: round2(l.listTotal), lineTotal, rate, scriptLineId: l.scriptLineId ?? null,
       vat: vatIn(lineTotal, rate), unitCost: packCost === null ? null : packCost / (it.pack_size as number),
     }
   })
@@ -206,15 +220,15 @@ export async function recordSale(tx: Tx, s: SaleInput, opts: { userId?: string |
 
   await tx`
     insert into sales (id, tenant_id, sale_no, till_run_id, kind, refund_of, occurred_at, user_id, account_id, medical_aid, member_no,
-                       total, rounding, vat, cost, cash_tendered, change_given, late)
+                       total, rounding, vat, cost, cash_tendered, change_given, late, script_id)
     values (${s.id}, current_setting('app.tenant_id')::uuid, ${saleNo}, ${s.runId}, ${s.kind}, ${s.refundOf ?? null}, ${s.occurredAt},
             ${opts.userId ?? null}, ${s.accountId ?? null}, ${s.medicalAid?.trim() || null}, ${s.memberNo?.trim() || null},
-            ${total}, ${rounding}, ${vat}, ${Math.round(cost * 10000) / 10000}, ${cashTendered}, ${change}, ${late})`
+            ${total}, ${rounding}, ${vat}, ${Math.round(cost * 10000) / 10000}, ${cashTendered}, ${change}, ${late}, ${s.scriptId ?? null})`
   for (const l of lines) {
     await tx`
-      insert into sale_lines (tenant_id, sale_id, line_no, item_id, qty_units, list_total, line_total, vat_rate, line_vat, unit_cost)
+      insert into sale_lines (tenant_id, sale_id, line_no, item_id, qty_units, list_total, line_total, vat_rate, line_vat, unit_cost, script_line_id)
       values (current_setting('app.tenant_id')::uuid, ${s.id}, ${l.lineNo}, ${l.itemId}, ${l.qtyUnits}, ${l.listTotal}, ${l.lineTotal},
-              ${l.rate}, ${l.vat}, ${l.unitCost})`
+              ${l.rate}, ${l.vat}, ${l.unitCost}, ${l.scriptLineId})`
   }
   for (const [n, p] of s.payments.entries()) {
     await tx`
@@ -222,7 +236,8 @@ export async function recordSale(tx: Tx, s: SaleInput, opts: { userId?: string |
       values (current_setting('app.tenant_id')::uuid, ${s.id}, ${n + 1}, ${p.tender}, ${round2(p.amount)}, ${p.reference?.trim() || null})`
   }
   // The goods have already left (or come back over) the counter, so record them whatever the stock level says.
-  await postMovements(tx, lines.map((l) => ({
+  // Script lines took their stock when the script was dispensed; a script's stock comes back only by reversing it.
+  await postMovements(tx, lines.filter((l) => !l.scriptLineId).map((l) => ({
     itemId: l.itemId, kind: s.kind === 'refund' ? 'sale_return' as const : 'sale' as const, qtyUnits: -l.qtyUnits,
     unitCost: l.unitCost, unitRetail: l.lineTotal / l.qtyUnits, refType: 'sale', refId: s.id,
     deviceId: opts.deviceId ?? null, occurredAt: s.occurredAt,
