@@ -2,7 +2,7 @@
 
 Pharmacy stock, till and dispensing software for Botswana, built to replace Compharm (RxWin, StockWin, POSWin) and to be sold to other pharmacies later.
 
-Built so far: **stage 1, items and stock**, and **stage 2, till and cash-up**. It runs beside Compharm as a test system, fed from Compharm's report exports, until dispensing and BOMAid claims are built too (see `docs/plan.md`).
+Built so far: **stage 1, items and stock**, **stage 2, till and cash-up**, and **stage 3, dispensing**. It runs beside Compharm as a test system, fed from Compharm's report exports, until BOMAid claims are built too (see `docs/plan.md`).
 
 ## What stage 1 does
 
@@ -14,7 +14,7 @@ Built so far: **stage 1, items and stock**, and **stage 2, till and cash-up**. I
 - **Min/max ordering**: the same rule as Compharm (every item at or below min, order up to max), exact and whole-pack quantities, CSV download, plus suggested levels from average daily usage.
 - **Reports**: stock value, negative stock, dormant stock, adjustments, GP exceptions, quarantined items, stock card and price history per item.
 - **Compharm import**: item list, min/max, 12-month usage and monthly sales exports.
-- **Keyboard first**: F2 items, F3 receive, F4 stock take, F6 order, F7 reports, F8 settings, F9 till, F10 cash-up, `/` to search, arrows and Enter to pick. A scanned barcode opens the item directly.
+- **Keyboard first**: F2 items, F3 receive, F4 stock take, F5 dispensary, F6 order, F7 reports, F8 settings, F9 till, F10 cash-up, `/` to search, arrows and Enter to pick. A scanned barcode opens the item directly.
 
 ## What stage 2 adds: the till and cash-up
 
@@ -27,6 +27,19 @@ Built so far: **stage 1, items and stock**, and **stage 2, till and cash-up**. I
 - **Customer accounts**: account sales and payments at the till, statements, corrections, and a debtors age analysis.
 - **Reports**: daily sales (takings, VAT, cost, GP, by tender and assistant) and sales GP per item with discounts given, both with CSV. Trading days are counted in the shop's own time zone (Africa/Gaborone).
 - **Sales are never edited or deleted**; a mistake is put right with a refund.
+
+## What stage 3 adds: dispensing
+
+- **Patients** (F5): search by surname (and first name), ID number, member number or phone. Main members and dependants: a member number finds the whole family, and dependants use the main member's medical aid. Usual doctor, customer account, notes, and allergies and alerts that show on every script.
+- **Doctors and medical aids**: the shop's own lists. A medical aid can carry a message shown on its members' scripts.
+- **Scripts**: pick the patient, doctor and script date, then add lines: item (scan, code or name), quantity in units or packs, how much to give now, directions (a code like `1T3D` becomes "Take ONE tablet THREE times a day"), supply days, repeats, ICD-10 codes and "patient pays" for lines the medical aid shouldn't be billed for. A script stays under unfinished scripts until it is dispensed or discarded.
+- **Checks before dispensing**: allergies and alerts must be ticked off, a line whose item matches an allergy is flagged, quarantined items are refused, scheduled items need the doctor, and short stock needs the pharmacist's override.
+- **Dispensing** gives the next script number (carrying on from Compharm's), takes the stock, records what is owed and splits the total between the medical aid and the patient. The script can't be changed after that; it can be reversed, which puts the stock back.
+- **Labels**: one per line handed over, with the shop, patient, item, quantity, directions, date, script number, doctor and dispenser. Label size is a setting.
+- **Owed items**: a list of everything still owed, handed over in one go or bit by bit, each with its own label.
+- **Repeats**: "Give a repeat" starts a draft of the lines with repeats left; repeats run out after a set number of days.
+- **At the till**, F2 brings a script in by number with the medical aid share already taken; the patient pays the rest by any tender, or on their account.
+- **Script book** and the **register of scheduled medicines** (from the stock ledger, with patient, ID, address, doctor and running balance), both with CSV.
 
 ## Checked against Compharm
 
@@ -89,7 +102,7 @@ Tests run against a real PostgreSQL database that is recreated each run. Pharmac
 
 ```
 migrations/         SQL schema, applied in order
-src/domain/         business rules: items, stock ledger, receiving, stock take, min/max, till, cash-up, accounts, sales reports, settings, auth
+src/domain/         business rules: items, stock ledger, receiving, stock take, min/max, till, cash-up, accounts, sales reports, patients, scripts, settings, auth
 src/import/         Compharm export readers and the import
 src/web/            screens (Hono JSX) and the JSON API
 src/web/till/       the till app that runs in the browser (plain JavaScript, no build step) and its service worker

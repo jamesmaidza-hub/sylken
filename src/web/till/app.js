@@ -37,7 +37,7 @@
   let online = navigator.onLine
   let byCode = new Map()
 
-  function newCart(kind = 'sale') { return { kind, lines: [], refundOf: null } }
+  function newCart(kind = 'sale') { return { kind, lines: [], refundOf: null, script: null } }
 
   function index() {
     byCode = new Map()
@@ -82,7 +82,7 @@
     tb.innerHTML = cart.lines.map((l, i) => {
       const changed = l.lineTotal !== l.listTotal
       const qty = l.units % l.n === 0 ? String(l.units / l.n) : `${l.units}/${l.n}`
-      return `<tr class="${i === sel ? 'sel' : ''}" data-i="${i}"><td>${esc(l.d)} <span class="code">${esc(l.c)}</span></td>
+      return `<tr class="${i === sel ? 'sel' : ''}" data-i="${i}"><td>${l.sl ? `<span class="rx">Rx ${esc(cart.script.scriptNo)}</span> ` : ''}${esc(l.d)} <span class="code">${esc(l.c)}</span></td>
         <td class="n">${qty}</td><td class="n">${money(l.p)}</td>
         <td class="n">${changed ? `<span class="was">${money(l.listTotal)}</span>` : ''}${money(l.lineTotal)}</td></tr>`
     }).join('')
@@ -154,7 +154,7 @@
     const n = it.n || 1
     const sign = cart.kind === 'refund' ? -1 : 1
     const u = sign * (units ?? Math.round(packs * n))
-    const existing = units === null && cart.lines.findIndex((l) => l.i === it.i && l.lineTotal === l.listTotal && l.units % n === 0)
+    const existing = units === null && cart.lines.findIndex((l) => !l.sl && l.i === it.i && l.lineTotal === l.listTotal && l.units % n === 0)
     if (existing !== false && existing >= 0) {
       const l = cart.lines[existing]
       l.units += u
@@ -208,9 +208,11 @@
     showResults()
   }
 
+  const scriptLine = (l) => { if (l && l.sl) { banner('Script lines are priced in the dispensary. Press Del to take the whole script off this sale.', true); return true } return false }
+
   async function changeQty() {
     const l = cart.lines[sel]
-    if (!l) return
+    if (!l || scriptLine(l)) return
     const it = cat.items.find((x) => x.i === l.i) || { l: false }
     const v = await ask(`<h2>Quantity</h2><p>${esc(l.d)} <span class="muted">pack of ${l.n}</span></p>
       <label>Packs<input name="packs" inputmode="decimal" value="${l.units % l.n === 0 ? Math.abs(l.units / l.n) : ''}" autofocus></label>
@@ -228,7 +230,7 @@
 
   async function changePrice() {
     const l = cart.lines[sel]
-    if (!l) return
+    if (!l || scriptLine(l)) return
     const v = await ask(`<h2>Change price</h2><p>${esc(l.d)}: list ${money(l.listTotal)} for this line</p>
       <label>Charge for the line (P)<input name="total" inputmode="decimal" value="${Math.abs(l.lineTotal).toFixed(2)}" autofocus></label>
       <label>or discount %<input name="pct" inputmode="decimal"></label>${buttons()}`)
@@ -242,7 +244,7 @@
 
   function bump(d) {
     const l = cart.lines[sel]
-    if (!l) return
+    if (!l || scriptLine(l)) return
     const step = l.n
     const sign = cart.kind === 'refund' ? -1 : 1
     const next = Math.abs(l.units) + d * step
@@ -257,8 +259,54 @@
 
   function removeLine() {
     if (sel < 0) return
+    if (cart.lines[sel] && cart.lines[sel].sl) {
+      cart.lines = cart.lines.filter((l) => !l.sl)
+      cart.script = null
+      sel = cart.lines.length - 1
+      render()
+      return
+    }
     cart.lines.splice(sel, 1)
     sel = Math.min(sel, cart.lines.length - 1)
+    render()
+  }
+
+  // ------------------------------------------------------------ scripts
+
+  /** Bring a dispensed script onto the sale by its number. The stock left at dispensing, so these lines take none. */
+  async function addScript() {
+    if (cart.script) { banner('One script per sale. Finish this sale first.', true); return }
+    if (!(await ensureRun())) return
+    const v = await ask(`<h2>${cart.kind === 'refund' ? 'Refund a script' : 'Pay for a script'}</h2>
+      <label>Script number<input name="no" inputmode="numeric" autofocus></label>${buttons('Find script')}`)
+    if (!v || !String(v.no).trim()) return
+    let sc
+    try {
+      const res = await fetch('/api/till/scripts/' + encodeURIComponent(String(v.no).trim()), { credentials: 'same-origin' })
+      if (res.status === 404) { banner(`There is no script number ${esc(v.no)}.`, true); return }
+      if (!res.ok) throw new Error()
+      sc = await res.json()
+      setOnline(true)
+    } catch {
+      setOnline(false)
+      banner('Finding a script needs the server. Try again when the till is back online.', true)
+      return
+    }
+    if (sc.status !== 'dispensed') { banner(`Script ${sc.scriptNo} is ${sc.status}, not dispensed.`, true); return }
+    const refund = cart.kind === 'refund'
+    if (!refund && sc.paid !== 0) {
+      const ok = await ask(`<h2>Already paid?</h2><p>Script ${sc.scriptNo} has ${money(sc.paid)} rung up against it already.</p>${buttons('Ring it up again')}`)
+      if (!ok) return
+    }
+    if (refund && sc.paid === 0) { banner(`Script ${sc.scriptNo} has not been paid at the till, so there is nothing to refund.`, true); return }
+    const sign = refund ? -1 : 1
+    cart.script = sc
+    for (const l of sc.lines) {
+      cart.lines.push({ i: l.itemId, c: l.stockCode, d: l.description, p: round2(l.lineTotal / l.qtyUnits), n: 1, units: sign * l.qtyUnits,
+        listTotal: sign * l.lineTotal, lineTotal: sign * l.lineTotal, sl: l.scriptLineId })
+    }
+    sel = cart.lines.length - 1
+    banner(`Script ${sc.scriptNo} for ${esc(sc.patientName)}${sc.medicalAid && sc.claimTotal ? `: ${money(sc.claimTotal)} to ${esc(sc.medicalAid)}, ${money(sc.patientTotal)} from the patient` : ''}.`)
     render()
   }
 
@@ -275,7 +323,18 @@
     let medicalAid = null
     let memberNo = null
     let cashTendered = 0
-    const order = refund ? ['cash', 'card', 'eft', 'account'] : ['cash', 'card', 'cheque', 'eft', 'account', 'medical_aid']
+    const sc = cart.script
+    const order = refund ? ['cash', 'card', 'eft', 'account', ...(sc && sc.medicalAid ? ['medical_aid'] : [])] : ['cash', 'card', 'cheque', 'eft', 'account', 'medical_aid']
+    const preferAccount = sc ? sc.accountId : null
+    if (sc) {
+      // The medical aid's share of a script is taken as its tender straight away; the patient pays the rest.
+      const claim = Math.min(round2(sc.claimTotal), due)
+      if (sc.medicalAid && claim > 0) {
+        medicalAid = sc.medicalAid
+        memberNo = sc.memberNo
+        payments.push({ tender: 'medical_aid', amount: claim, reference: null })
+      }
+    }
     for (;;) {
       const paid = round2(payments.reduce((a, p) => a + p.amount, 0))
       const left = round2(due - paid)
@@ -292,7 +351,7 @@
           f.tender.value = t
           f.querySelectorAll('[data-t]').forEach((b) => b.classList.toggle('on', b.dataset.t === t))
           const extra = f.querySelector('[data-extra]')
-          if (t === 'account') extra.innerHTML = `<label>Account<select name="account">${(cat.accounts || []).map((a) => `<option value="${a.id}" ${a.id === accountId ? 'selected' : ''}>${esc(a.name)} (${esc(a.no)})</option>`).join('')}</select></label>`
+          if (t === 'account') extra.innerHTML = `<label>Account<select name="account">${(cat.accounts || []).map((a) => `<option value="${a.id}" ${a.id === (accountId || preferAccount) ? 'selected' : ''}>${esc(a.name)} (${esc(a.no)})</option>`).join('')}</select></label>`
           else if (t === 'medical_aid') extra.innerHTML = `<label>Medical aid<input name="aid" value="${esc(medicalAid || 'BOMAid')}"></label><label>Member number<input name="member" value="${esc(memberNo || '')}"></label>`
           else if (t === 'card' || t === 'cheque' || t === 'eft') extra.innerHTML = `<label>Reference (optional)<input name="ref"></label>`
           else extra.innerHTML = ''
@@ -330,14 +389,15 @@
     const change = refund ? 0 : round2(cashTendered - cashPaid)
     const sale = {
       id: uuid(), runId: run.id, kind: cart.kind, refundOf: cart.refundOf, occurredAt: new Date().toISOString(),
-      accountId, medicalAid, memberNo, cashTendered: cashPaid > 0 && !refund ? cashTendered : null,
-      lines: cart.lines.map((l) => ({ itemId: l.i, qtyUnits: l.units, listTotal: l.listTotal, lineTotal: l.lineTotal })),
+      accountId, medicalAid, memberNo, cashTendered: cashPaid > 0 && !refund ? cashTendered : null, scriptId: cart.script ? cart.script.id : null,
+      lines: cart.lines.map((l) => ({ itemId: l.i, qtyUnits: l.units, listTotal: l.listTotal, lineTotal: l.lineTotal, scriptLineId: l.sl || null })),
       payments: payments.map((p) => ({ ...p, amount: round2(sign * p.amount) })),
     }
     queue({ type: 'sale', data: sale })
     const slipNo = (load('slipNo', 0) || 0) + 1
     save('slipNo', slipNo)
-    lastSlip = { sale, slipNo, lines: cart.lines.map((l) => ({ d: l.d, units: l.units, n: l.n, lineTotal: l.lineTotal })), change, cashier: user.name, at: sale.occurredAt }
+    lastSlip = { sale, slipNo, lines: cart.lines.map((l) => ({ d: l.d, units: l.units, n: l.n, lineTotal: l.lineTotal })), change, cashier: user.name, at: sale.occurredAt,
+      script: cart.script ? { no: cart.script.scriptNo, patient: cart.script.patientName } : null }
     save('lastSlip', lastSlip)
     const last = $('last')
     last.hidden = false
@@ -391,7 +451,9 @@
     $('slip').innerHTML = `<h3>${esc(t ? t.name : boot.tenantName)}</h3>
       ${t && t.vatNumber ? `<div class="c">VAT no ${esc(t.vatNumber)}</div>` : ''}
       <div class="c">${s.sale.kind === 'refund' ? 'REFUND' : 'TAX INVOICE'}</div>
-      <div>${new Date(s.at).toLocaleString('en-GB')} · ${esc(till ? till.code : '')}-${s.slipNo} · ${esc(s.cashier)}</div><hr>
+      <div>${new Date(s.at).toLocaleString('en-GB')} · ${esc(till ? till.code : '')}-${s.slipNo} · ${esc(s.cashier)}</div>
+      ${s.script ? `<div>Script ${esc(s.script.no)} · ${esc(s.script.patient)}</div>` : ''}
+      ${s.sale.medicalAid ? `<div>${esc(s.sale.medicalAid)} ${esc(s.sale.memberNo || '')}</div>` : ''}<hr>
       <table>${s.lines.map((l) => `<tr><td>${esc(l.d)}<br>${l.units % l.n === 0 ? l.units / l.n : l.units + '/' + l.n}</td><td class="n">${money(l.lineTotal)}</td></tr>`).join('')}</table><hr>
       <table><tr><td><b>Total incl VAT</b></td><td class="n"><b>${money(total)}</b></td></tr>
       ${s.sale.payments.map((p) => `<tr><td>${tenderNames[p.tender]}</td><td class="n">${money(p.tender === 'cash' && s.change ? p.amount + s.change : p.amount)}</td></tr>`).join('')}
@@ -483,7 +545,7 @@
     const scan = $('scan')
     const inScan = e.target === scan
     const k = e.key
-    const fkeys = { F4: changeQty, F5: pay, F6: changePrice, F8: toggleRefund, F9: pettyCash, F10: accountPayment, F12: printSlip }
+    const fkeys = { F2: addScript, F4: changeQty, F5: pay, F6: changePrice, F8: toggleRefund, F9: pettyCash, F10: accountPayment, F12: printSlip }
     if (fkeys[k]) { e.preventDefault(); fkeys[k](); return }
     if (k === 'Escape') {
       e.preventDefault()
