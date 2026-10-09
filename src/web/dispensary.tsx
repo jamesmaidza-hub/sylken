@@ -44,6 +44,23 @@ document.querySelectorAll('input[data-items]').forEach((inp) => {
   })
 })`
 
+/** Keys on a draft script, the same ones RxWin uses, so staff keep their habits. */
+const scriptKeys = (patientId: string) => `
+(() => {
+  const f = document.getElementById('add-line')
+  const mark = (el) => { const l = el.closest('label') || el; l.classList.remove('flash'); void l.offsetWidth; l.classList.add('flash') }
+  window.pageKeys = {
+    F9: () => { location.href = '/dispensary/patients/${patientId}#scripts' },
+    'Ctrl+u': () => { location.href = '/dispensary' },
+  }
+  if (!f) return
+  Object.assign(window.pageKeys, {
+    F3: () => { f.noClaim.checked = !f.noClaim.checked; mark(f.noClaim) },
+    F4: () => { f.supply.value = '0'; mark(f.supply) },
+    F8: () => { f.repeats.focus(); f.repeats.select(); mark(f.repeats) },
+  })
+})()`
+
 function PatientPanel({ p, flags }: { p: Patient; flags?: { kind: string; text: string; detail: string | null }[] }) {
   const age = ageOn(p.dateOfBirth)
   const allergies = (flags ?? []).filter((f) => f.kind === 'allergy')
@@ -102,7 +119,7 @@ function PatientForm(props: { action: string; p?: Patient | null; mainMember?: P
       <label>Usual doctor<select name="doctorId"><option value=""></option>{props.doctors.map((d) => <option value={d.id} selected={p?.doctorId === d.id}>{d.name}</option>)}</select></label>
       <label>Customer account<select name="accountId"><option value="">None</option>{props.accounts.map((a) => <option value={a.id} selected={p?.accountId === a.id}>{a.name} ({a.accountNo})</option>)}</select></label>
       <label>Notes<input name="notes" value={p?.notes ?? ''} /></label>
-      {p && <label class="row" style="flex-direction:row"><input type="checkbox" name="inactive" checked={!p.active} /> Inactive (moved away, died)</label>}
+      {p?.id && <label class="row" style="flex-direction:row"><input type="checkbox" name="inactive" checked={!p.active} /> Inactive (moved away, died)</label>}
       <div><button>{props.submit}</button></div>
     </form>
   )
@@ -218,14 +235,15 @@ export function dispensaryRoutes() {
           <label>Doctor<select name="doctorId"><option value="">None on the script</option>{data.doctors.map((d) => <option value={d.id} selected={d.id === p.doctorId}>{d.name}{d.practiceNo ? ` (${d.practiceNo})` : ''}</option>)}</select></label>
           <label>Date on the script<input name="rxDate" type="date" value={today} max={today} required /></label>
           {p.medicalAidName && <label class="row" style="flex-direction:row"><input type="checkbox" name="private" /> Patient pays (don't bill {p.medicalAidName})</label>}
-          <div><button>Start script</button></div>
+          <div><button autofocus>Start script</button></div>
         </form>
+        <p class="hint">Press Enter to start a script with this doctor and today's date.</p>
         <LabelLink id={c.req.query('label')} />
         {data.owed.length > 0 && <>
           <h2>Owed to this patient</h2>
           <OwedTable owed={data.owed} canSupply={pharmacist(c)} />
         </>}
-        <h2>Scripts</h2>
+        <h2 id="scripts">Scripts</h2>
         {data.scripts.length
           ? <div class="wrap"><table>
               <thead><tr><th>Script</th><th>Date</th><th>Doctor</th><th>Items</th><th class="n">Total</th><th>Status</th><th class="n">Repeats left</th></tr></thead>
@@ -408,7 +426,7 @@ export function dispensaryRoutes() {
 
         {draft && !s.repeatOf && <>
           <h2>Add an item</h2>
-          <form method="post" action={`/dispensary/scripts/${s.id}/lines`} class="grid panel">
+          <form method="post" action={`/dispensary/scripts/${s.id}/lines`} class="grid panel" id="add-line">
             <label style="grid-column:span 2">Item (scan, code or name)<input name="item" list="items-dl" data-items required autofocus autocomplete="off" /></label>
             <datalist id="items-dl" />
             <label>Quantity<span class="row"><input name="qty" type="number" min="1" step="1" required style="width:90px" />
@@ -421,6 +439,10 @@ export function dispensaryRoutes() {
             <label>ICD-10<input name="icd10" placeholder="e.g. J06.9" /></label>
             <label class="row" style="flex-direction:row"><input type="checkbox" name="noClaim" /> Patient pays for this line</label>
             <div><button>Add line</button></div>
+            <p class="keybar" style="grid-column:1/-1">
+              <span><kbd>Enter</kbd>add line</span><span><kbd>F3</kbd>patient pays (no claim)</span><span><kbd>F4</kbd>owe it, give none now</span>
+              <span><kbd>F8</kbd>repeats</span><span><kbd>F9</kbd>patient's history</span><span><kbd>Ctrl</kbd>+<kbd>U</kbd>park, finish later</span>
+            </p>
           </form>
           <p class="hint">Price = the item at the shop's price for the units prescribed{settings.dispensingFee ? `, plus a dispensing fee of ${money(settings.dispensingFee)} a line` : ''}. Medical aid pricing rules come with claims.</p>
         </>}
@@ -462,6 +484,7 @@ export function dispensaryRoutes() {
           )}
         </>}
         <script>{raw(itemPicker)}</script>
+        {draft && <script>{raw(scriptKeys(s.patient.id))}</script>}
       </>
     ))
   })

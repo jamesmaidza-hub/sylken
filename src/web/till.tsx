@@ -69,10 +69,13 @@ function tillPage(c: Ctx) {
                 <thead><tr><th>Item</th><th class="n">Qty</th><th class="n">Price</th><th class="n">Total</th></tr></thead>
                 <tbody id="lines"></tbody>
               </table>
-              <p id="empty" class="muted center">Scan an item to start a sale.</p>
+              <div id="empty" class="empty">
+                <p><b>Scan an item to start a sale.</b></p>
+                <p class="muted">Or type part of its name and pick it with ↑ ↓ and Enter. Type <kbd>3*</kbd> before a code to sell three. Press <kbd>Enter</kbd> on an empty box to pay.</p>
+              </div>
             </section>
             <aside class="right">
-              <div class="due"><span id="due-label">To pay</span><b id="total">P0.00</b><span id="vat" class="muted"></span></div>
+              <div class="due"><span id="due-label">To pay</span><b id="total">P0.00</b><span id="count" class="muted"></span></div>
               <div id="last" class="last" hidden></div>
               <dl class="keys">
                 <dt>F5</dt><dd>Pay</dd>

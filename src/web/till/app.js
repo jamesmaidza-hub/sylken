@@ -58,6 +58,30 @@
     b.hidden = !text
     b.className = 'banner' + (bad ? ' bad' : '')
     b.innerHTML = text || ''
+    if (text && bad) beep()
+  }
+
+  // A short low tone when something needs the cashier's eyes, e.g. a barcode that matched nothing.
+  let audio = null
+  function beep() {
+    try {
+      audio = audio || new (window.AudioContext || window.webkitAudioContext)()
+      const o = audio.createOscillator(), g = audio.createGain()
+      o.frequency.value = 330; g.gain.value = 0.08
+      o.connect(g); g.connect(audio.destination)
+      o.start(); o.stop(audio.currentTime + 0.18)
+    } catch { /* no sound available */ }
+  }
+
+  /** Stock on hand as the shop counts it: whole packs, plus loose units if any. */
+  function stockText(it) {
+    const s = it.s ?? null
+    if (s === null) return ''
+    if (s <= 0) return '<span class="stock out">none in stock</span>'
+    const n = it.n || 1
+    const packs = Math.floor(s / n), loose = s % n
+    const t = n === 1 ? `${s}` : packs && loose ? `${packs} + ${loose} loose` : packs ? `${packs}` : `${loose} loose`
+    return `<span class="stock">${t} in stock</span>`
   }
 
   function header() {
@@ -90,8 +114,11 @@
         <td class="n">${changed ? `<span class="was">${money(l.listTotal)}</span>` : ''}${money(l.lineTotal)}</td></tr>`
     }).join('')
     $('empty').hidden = cart.lines.length > 0
+    if (cart.lines.length) $('last').hidden = true
     const { total } = totals()
     $('total').textContent = money(total)
+    const count = cart.lines.length
+    $('count').textContent = count ? `${count} line${count === 1 ? '' : 's'}` : ''
     $('due-label').textContent = cart.kind === 'refund' ? 'To refund' : 'To pay'
     document.querySelector('.due').classList.toggle('refund', cart.kind === 'refund')
     $('mode').hidden = cart.kind !== 'refund'
@@ -101,8 +128,10 @@
   function showResults() {
     const ul = $('results')
     ul.hidden = !results.length
-    ul.innerHTML = results.map((it, i) => `<li class="${i === resultSel ? 'sel' : ''}" data-i="${i}"><span class="code">${esc(it.c)}</span>
-      <span>${esc(it.d)}${it.z ? ' <span class="muted">(dormant)</span>' : ''}</span><span class="price">${money(it.p)}${it.n > 1 ? ` <span class="muted">/ ${it.n}</span>` : ''}</span></li>`).join('')
+    ul.innerHTML = results.map((it, i) => `<li class="${i === resultSel ? 'sel' : ''}${it.z ? ' dormant' : ''}" data-i="${i}"><span class="code">${esc(it.c)}</span>
+      <span class="desc">${esc(it.d)}${it.z ? ' <span class="muted">(dormant)</span>' : ''}</span>${stockText(it)}<span class="price">${money(it.p)}${it.n > 1 ? ` <span class="muted">/ ${it.n}</span>` : ''}</span></li>`).join('')
+    const on = ul.querySelector('li.sel')
+    if (on) on.scrollIntoView({ block: 'nearest' })
   }
 
   // ------------------------------------------------------------ modal forms
@@ -112,6 +141,7 @@
     return new Promise((resolve) => {
       const m = $('modal')
       const f = $('modal-form')
+      if (results.length) { results = []; showResults() }
       f.innerHTML = html
       m.hidden = false
       modalDone = (v) => { m.hidden = true; f.innerHTML = ''; modalDone = null; $('scan').focus(); resolve(v) }
@@ -184,7 +214,7 @@
         if (out.length >= 200) break
       }
     }
-    out.sort((a, b) => (b.d.toUpperCase().startsWith(words[0]) - a.d.toUpperCase().startsWith(words[0])) || (a.z || 0) - (b.z || 0) || a.d.localeCompare(b.d))
+    out.sort((a, b) => (a.z || 0) - (b.z || 0) || (b.d.toUpperCase().startsWith(words[0]) - a.d.toUpperCase().startsWith(words[0])) || a.d.localeCompare(b.d))
     return out.slice(0, 15)
   }
 
@@ -199,11 +229,11 @@
     const input = $('scan')
     const { packs, units, q } = parseScan(input.value)
     if (!q) { if (cart.lines.length) pay(); return }
-    if (!(await ensureRun())) return
     let it = byCode.get(q.toUpperCase())
     if (!it && results.length) it = results[resultSel]
     if (!it) { banner(`Nothing matches "${esc(q)}".`, true); input.select(); return }
     if (units !== null && !it.l && units % it.n !== 0) { banner(`${esc(it.d)} is only sold in whole packs of ${it.n}.`, true); return }
+    if (!(await ensureRun())) return
     banner('')
     addItem(it, packs, units)
     input.value = ''
@@ -348,9 +378,32 @@
         ${payments.length ? `<table>${payments.map((p) => `<tr><td>${tenderNames[p.tender]}${p.reference ? ` <span class="muted">${esc(p.reference)}</span>` : ''}</td><td class="n">${money(p.amount)}</td></tr>`).join('')}<tr><td><b>Still to ${refund ? 'refund' : 'pay'}</b></td><td class="n"><b>${money(left)}</b></td></tr></table>` : ''}
         <div class="tenders">${order.map((t, i) => `<button type="button" data-t="${t}"><kbd>${i + 1}</kbd>${tenderNames[t]}</button>`).join('')}</div>
         <input type="hidden" name="tender" value="cash">
-        <label>Amount (P)<input name="amount" inputmode="decimal" value="${left.toFixed(2)}" autofocus></label>
+        <label>Amount (P)<input name="amount" class="amount" inputmode="decimal" value="${left.toFixed(2)}" autofocus></label>
+        <div class="quick" data-quick></div>
+        <p class="change" data-change></p>
         <div data-extra></div>
         <p class="err" data-err></p>${buttons(refund ? 'Refund' : 'Take payment')}`, (f) => {
+        const showChange = () => {
+          const out = f.querySelector('[data-change]')
+          const a = round2(num(f.amount.value))
+          const owed = f.tender.value === 'cash' ? roundCash(left) : left
+          if (!(a > 0)) out.innerHTML = ''
+          else if (a > owed && f.tender.value === 'cash' && !refund) out.innerHTML = `Change <b>${money(round2(a - owed))}</b>`
+          else if (a < owed) out.innerHTML = `Still to ${refund ? 'refund' : 'pay'} after this: <b>${money(round2(owed - a))}</b>`
+          else out.innerHTML = ''
+        }
+        // Cash notes a customer is likely to hand over, so a click takes the payment.
+        const quick = (t) => {
+          const q = f.querySelector('[data-quick]')
+          if (t !== 'cash' || refund) { q.innerHTML = ''; return }
+          const owed = roundCash(left)
+          const notes = [...new Set([10, 20, 50, 100, 200].filter((v) => v > owed).slice(0, 3).concat(owed > 200 ? [Math.ceil(owed / 100) * 100] : []))]
+            .filter((v) => v > owed)
+          q.innerHTML = `<button type="button" class="secondary" data-amt="${owed}">Exact ${money(owed)}</button>` +
+            notes.map((v) => `<button type="button" class="secondary" data-amt="${v}">${money(v)}</button>`).join('')
+          q.querySelectorAll('[data-amt]').forEach((b) => (b.onclick = () => { f.amount.value = Number(b.dataset.amt).toFixed(2); f.requestSubmit() }))
+        }
+        f.amount.addEventListener('input', showChange)
         const pick = (t) => {
           f.tender.value = t
           f.querySelectorAll('[data-t]').forEach((b) => b.classList.toggle('on', b.dataset.t === t))
@@ -363,6 +416,8 @@
           if (t === 'cash' && cashLeft !== left) extra.innerHTML = `<p class="muted">Rounded to ${money(cashLeft)} for cash (was ${money(left)}).</p>`
           f.amount.value = (t === 'cash' ? cashLeft : left).toFixed(2)
           f.amount.focus(); f.amount.select()
+          quick(t)
+          showChange()
         }
         f.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => pick(b.dataset.t)))
         f.addEventListener('keydown', (e) => {
@@ -422,7 +477,14 @@
     const last = $('last')
     last.hidden = false
     const settled = round2(due + rounding)
-    last.innerHTML = refund ? `Refunded <b>${money(settled)}</b>` : change > 0 ? `Change <b>${money(change)}</b>` : `Paid <b>${money(settled)}</b>`
+    last.className = 'last' + (change > 0 ? ' change' : '')
+    last.innerHTML = refund ? `<span>Refunded</span><b>${money(settled)}</b>`
+      : change > 0 ? `<span>Give change</span><b>${money(change)}</b><small>${money(cashTendered)} cash for ${money(settled)}</small>`
+      : `<span>Paid</span><b>${money(settled)}</b><small>${payments.map((p) => tenderNames[p.tender]).join(' + ')}</small>`
+    for (const l of cart.lines) { const it = !l.sl && cat.items.find((x) => x.i === l.i); if (it && it.s !== undefined) it.s -= l.units }
+    $('scan').value = ''
+    results = []
+    showResults()
     cart = newCart()
     sel = -1
     render()

@@ -41,6 +41,23 @@ describe('web', () => {
     }
   })
 
+  it('starts a new patient from a search as active, with the surname filled in', async () => {
+    const { get } = await loggedIn()
+    const html = await (await get('/dispensary/patients/new?surname=kgosi')).text()
+    expect(html).toContain('value="KGOSI"')
+    expect(html).not.toContain('name="inactive"')
+  })
+
+  it('lists items the shop carries before dormant catalogue items', async () => {
+    const { t, get } = await loggedIn()
+    await t.as(async (tx) => {
+      await createItem(tx, { stockCode: 'D1', description: 'AAA AMOXIL OLD', costPerPack: 5, status: 'dormant' })
+      await createItem(tx, { stockCode: 'A1', description: 'ZZZ AMOXIL NEW', costPerPack: 5 })
+    })
+    const html = await (await get('/items?q=amoxil')).text()
+    expect(html.indexOf('ZZZ AMOXIL NEW')).toBeLessThan(html.indexOf('AAA AMOXIL OLD'))
+  })
+
   it('goes straight to the item when a barcode is scanned into search', async () => {
     const { t, get } = await loggedIn()
     const item = await t.as((tx) => createItem(tx, { stockCode: '6005894000352', description: 'COUGH SYRUP', costPerPack: 10 }))
