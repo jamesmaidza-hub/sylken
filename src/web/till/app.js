@@ -20,6 +20,9 @@
   }
   // Same rule as the server: a line is its units as a fraction of the pack price, so whole packs are exact.
   const linePrice = (packPrice, packSize, units) => round2((units / packSize) * packPrice)
+  // Cash due is rounded to the shop's smallest coin (5 thebe in Botswana), same rule as the server.
+  const roundCash = (n) => { const s = (cat && cat.tenant.cashRounding) || 0.01; return s > 0.01 ? round2(Math.round(n / s + 1e-9) * s) : round2(n) }
+  const vatIn = (n, rate) => round2((n * rate) / (1 + rate))
   const tenderNames = { cash: 'Cash', card: 'Card', cheque: 'Cheque', eft: 'EFT', account: 'Account', medical_aid: 'Medical aid' }
   const deviceId = load('device', null) || (() => { const d = 'web-' + uuid().slice(0, 8); save('device', d); return d })()
 
@@ -160,7 +163,7 @@
       l.units += u
       if (l.units === 0) { cart.lines.splice(existing, 1); sel = Math.min(sel, cart.lines.length - 1) } else { reprice(l); sel = existing }
     } else {
-      const l = { i: it.i, c: it.c, d: it.d, p: it.p, n, units: u, listTotal: 0, lineTotal: 0 }
+      const l = { i: it.i, c: it.c, d: it.d, p: it.p, n, v: it.v ?? cat.tenant.vatRate ?? 0.14, units: u, listTotal: 0, lineTotal: 0 }
       reprice(l)
       cart.lines.push(l)
       sel = cart.lines.length - 1
@@ -275,10 +278,11 @@
     let medicalAid = null
     let memberNo = null
     let cashTendered = 0
+    let rounding = 0                                  // cash rounding taken, in the same direction as `due`
     const order = refund ? ['cash', 'card', 'eft', 'account'] : ['cash', 'card', 'cheque', 'eft', 'account', 'medical_aid']
     for (;;) {
       const paid = round2(payments.reduce((a, p) => a + p.amount, 0))
-      const left = round2(due - paid)
+      const left = round2(due + rounding - paid)
       if (left <= 0 && payments.length) break
       if (due === 0) break
       const v = await ask(`<h2>${refund ? 'Refund' : 'Pay'} ${money(due)}</h2>
@@ -296,6 +300,9 @@
           else if (t === 'medical_aid') extra.innerHTML = `<label>Medical aid<input name="aid" value="${esc(medicalAid || 'BOMAid')}"></label><label>Member number<input name="member" value="${esc(memberNo || '')}"></label>`
           else if (t === 'card' || t === 'cheque' || t === 'eft') extra.innerHTML = `<label>Reference (optional)<input name="ref"></label>`
           else extra.innerHTML = ''
+          const cashLeft = roundCash(left)
+          if (t === 'cash' && cashLeft !== left) extra.innerHTML = `<p class="muted">Rounded to ${money(cashLeft)} for cash (was ${money(left)}).</p>`
+          f.amount.value = (t === 'cash' ? cashLeft : left).toFixed(2)
           f.amount.focus(); f.amount.select()
         }
         f.querySelectorAll('[data-t]').forEach((b) => (b.onclick = () => pick(b.dataset.t)))
@@ -313,12 +320,22 @@
       if (v.tender === 'account') {
         if (!v.account) { banner('There are no customer accounts. Add one in the back office first.', true); continue }
         if (accountId && accountId !== v.account) { banner('One sale can go on one account only.', true); continue }
+        const a = cat.accounts.find((x) => x.id === v.account)
+        const owes = round2((a ? a.balance : 0) + accountMovesFor(v.account))
+        if (a && a.limit !== null && !refund && owes + amount > a.limit + 0.001) {
+          banner(`${esc(a.name)} would go over the credit limit: owes ${money(owes)}, limit ${money(a.limit)}.`, true); continue
+        }
         accountId = v.account
       }
       if (v.tender === 'medical_aid') { medicalAid = (v.aid || '').trim(); memberNo = (v.member || '').trim(); if (!medicalAid) { banner('Enter the medical aid name.', true); continue } }
-      if (v.tender === 'cash' && !refund) {
+      const cashLeft = roundCash(left)
+      if (v.tender === 'cash' && amount >= cashLeft && (!refund || amount === cashLeft)) {
+        // This cash settles the sale: what's due is rounded to the coin, anything over is change.
+        if (!refund) cashTendered = round2(cashTendered + amount)
+        rounding = round2(rounding + cashLeft - left)
+        amount = cashLeft
+      } else if (v.tender === 'cash' && !refund) {
         cashTendered = round2(cashTendered + amount)
-        amount = Math.min(amount, left)                 // anything over is change
       } else if (amount > left) { banner(`Only ${money(left)} is left to ${refund ? 'refund' : 'pay'}; only cash can be more, for change.`, true); continue }
       banner('')
       const existing = payments.find((p) => p.tender === v.tender && !v.ref && !p.reference)
@@ -330,18 +347,21 @@
     const change = refund ? 0 : round2(cashTendered - cashPaid)
     const sale = {
       id: uuid(), runId: run.id, kind: cart.kind, refundOf: cart.refundOf, occurredAt: new Date().toISOString(),
-      accountId, medicalAid, memberNo, cashTendered: cashPaid > 0 && !refund ? cashTendered : null,
+      accountId, medicalAid, memberNo, cashTendered: cashPaid > 0 && !refund ? cashTendered : null, rounding: round2(sign * rounding),
       lines: cart.lines.map((l) => ({ itemId: l.i, qtyUnits: l.units, listTotal: l.listTotal, lineTotal: l.lineTotal })),
       payments: payments.map((p) => ({ ...p, amount: round2(sign * p.amount) })),
     }
     queue({ type: 'sale', data: sale })
     const slipNo = (load('slipNo', 0) || 0) + 1
     save('slipNo', slipNo)
-    lastSlip = { sale, slipNo, lines: cart.lines.map((l) => ({ d: l.d, units: l.units, n: l.n, lineTotal: l.lineTotal })), change, cashier: user.name, at: sale.occurredAt }
+    const onAccount = round2(payments.filter((p) => p.tender === 'account').reduce((a, p) => a + p.amount, 0))
+    if (accountId && onAccount) noteAccountMove(sale.id, accountId, sign * onAccount)
+    lastSlip = { sale, slipNo, lines: cart.lines.map((l) => ({ d: l.d, units: l.units, n: l.n, lineTotal: l.lineTotal, v: l.v })), change, cashier: user.name, at: sale.occurredAt }
     save('lastSlip', lastSlip)
     const last = $('last')
     last.hidden = false
-    last.innerHTML = refund ? `Refunded <b>${money(due)}</b>` : change > 0 ? `Change <b>${money(change)}</b>` : `Paid <b>${money(due)}</b>`
+    const settled = round2(due + rounding)
+    last.innerHTML = refund ? `Refunded <b>${money(settled)}</b>` : change > 0 ? `Change <b>${money(change)}</b>` : `Paid <b>${money(settled)}</b>`
     cart = newCart()
     sel = -1
     render()
@@ -374,7 +394,9 @@
     if (!v) return
     const amount = round2(num(v.amount))
     if (!(amount > 0)) { banner('Enter an amount above zero.', true); return }
-    queue({ type: 'till_entry', data: { id: uuid(), runId: run.id, kind: 'account_payment', tender: v.tender, amount, accountId: v.account, occurredAt: new Date().toISOString() } })
+    const entryId = uuid()
+    queue({ type: 'till_entry', data: { id: entryId, runId: run.id, kind: 'account_payment', tender: v.tender, amount, accountId: v.account, occurredAt: new Date().toISOString() } })
+    noteAccountMove(entryId, v.account, -amount)
     const a = cat.accounts.find((x) => x.id === v.account)
     banner(`${money(amount)} received from ${esc(a ? a.name : 'account')}.`)
     sync()
@@ -394,11 +416,21 @@
       <div>${new Date(s.at).toLocaleString('en-GB')} · ${esc(till ? till.code : '')}-${s.slipNo} · ${esc(s.cashier)}</div><hr>
       <table>${s.lines.map((l) => `<tr><td>${esc(l.d)}<br>${l.units % l.n === 0 ? l.units / l.n : l.units + '/' + l.n}</td><td class="n">${money(l.lineTotal)}</td></tr>`).join('')}</table><hr>
       <table><tr><td><b>Total incl VAT</b></td><td class="n"><b>${money(total)}</b></td></tr>
+      <tr><td>VAT included</td><td class="n">${money(round2(s.lines.reduce((a, l) => a + vatIn(l.lineTotal, l.v ?? 0.14), 0)))}</td></tr>
+      ${s.sale.rounding ? `<tr><td>Cash rounding</td><td class="n">${money(s.sale.rounding)}</td></tr><tr><td><b>Paid</b></td><td class="n"><b>${money(round2(total + s.sale.rounding))}</b></td></tr>` : ''}
       ${s.sale.payments.map((p) => `<tr><td>${tenderNames[p.tender]}</td><td class="n">${money(p.tender === 'cash' && s.change ? p.amount + s.change : p.amount)}</td></tr>`).join('')}
       ${s.change ? `<tr><td>Change</td><td class="n">${money(s.change)}</td></tr>` : ''}</table>
       ${t && t.receiptFooter ? `<hr><div class="c">${esc(t.receiptFooter)}</div>` : ''}`
     window.print()
   }
+
+  // ------------------------------------------------------------ account balances between item-list refreshes
+
+  // Account charges and payments made on this till that the last item list doesn't include yet,
+  // so the credit limit check sees them. Dropped once a refresh started after they reached the server.
+  let accountMoves = load('accountMoves', [])
+  function noteAccountMove(id, accountId, amount) { accountMoves.push({ id, accountId, amount }); save('accountMoves', accountMoves) }
+  function accountMovesFor(accountId) { return accountMoves.filter((m) => m.accountId === accountId).reduce((a, m) => a + m.amount, 0) }
 
   // ------------------------------------------------------------ sync
 
@@ -428,11 +460,14 @@
         const op = batch.find((o) => o.data.id === r.id)
         if (!op) continue
         done.add(op)
+        const move = accountMoves.find((m) => m.id === r.id)
+        if (move && !move.syncedAt) move.syncedAt = Date.now()
         if (r.status === 'rejected') failed.push({ op, error: r.error, at: new Date().toISOString() })
       }
       outbox = outbox.filter((o) => !done.has(o))
       save('outbox', outbox)
       save('failed', failed)
+      save('accountMoves', accountMoves)
       if (run && body.runs[run.id]) {
         run.runNo = body.runs[run.id].runNo
         if (body.runs[run.id].status === 'closed') {
@@ -451,11 +486,14 @@
   }
 
   async function refreshCatalogue() {
+    const started = Date.now()
     try {
       const res = await fetch('/api/till/catalogue', { credentials: 'same-origin' })
       if (res.status === 401) { banner('Your login has expired. <a href="/login">Log in again</a>.', true); return }
       if (!res.ok) throw new Error()
       cat = await res.json()
+      accountMoves = accountMoves.filter((m) => !(m.syncedAt && m.syncedAt < started))
+      save('accountMoves', accountMoves)
       user = cat.user
       save('catalogue', cat)
       index()

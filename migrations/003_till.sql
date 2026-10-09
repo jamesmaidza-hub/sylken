@@ -6,7 +6,8 @@ alter table tenant_settings
   add column default_float   numeric(12,2) not null default 0,     -- cash left in the drawer to start a run
   add column vat_number      text,                                 -- printed on till slips
   add column receipt_footer  text,
-  add column timezone        text not null default 'Africa/Gaborone';  -- trading days are counted in shop time
+  add column timezone        text not null default 'Africa/Gaborone',  -- trading days are counted in shop time
+  add column cash_rounding   numeric(6,2) not null default 0.05;       -- cash due is rounded to this (5 thebe); 0.01 = none
 
 -- Per-tenant counters (till run numbers, sale numbers).
 create table tenant_counters (
@@ -87,6 +88,7 @@ create table sales (
   medical_aid      text,                                           -- scheme name for a medical aid tender
   member_no        text,
   total            numeric(12,2) not null,                         -- incl VAT; negative for refunds
+  rounding         numeric(6,2) not null default 0,                -- cash rounding: payments = total + rounding
   vat              numeric(12,2) not null,
   cost             numeric(14,4) not null default 0,               -- excl VAT, at average cost
   cash_tendered    numeric(12,2),

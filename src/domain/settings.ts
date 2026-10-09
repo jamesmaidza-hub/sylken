@@ -14,6 +14,7 @@ export interface Settings {
   vatNumber: string | null
   receiptFooter: string | null
   timezone: string
+  cashRounding: number
 }
 
 export async function getSettings(tx: Tx): Promise<Settings> {
@@ -32,6 +33,7 @@ export async function getSettings(tx: Tx): Promise<Settings> {
     vatNumber: s.vat_number,
     receiptFooter: s.receipt_footer,
     timezone: s.timezone,
+    cashRounding: num(s.cash_rounding),
   }
 }
 
@@ -48,6 +50,7 @@ const columns: Record<keyof Settings, string> = {
   vatNumber: 'vat_number',
   receiptFooter: 'receipt_footer',
   timezone: 'timezone',
+  cashRounding: 'cash_rounding',
 }
 
 export async function updateSettings(tx: Tx, patch: Partial<Settings>, userId?: string) {

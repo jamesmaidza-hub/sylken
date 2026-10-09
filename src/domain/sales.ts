@@ -122,7 +122,7 @@ export async function dailySales(tx: Tx, range: DayRange) {
   const days = await tx`
     select (s.occurred_at at time zone ${timezone})::date::text as day,
            count(*) filter (where s.kind = 'sale')::int as sales, count(*) filter (where s.kind = 'refund')::int as refunds,
-           sum(s.total) as total, sum(s.vat) as vat, sum(s.cost) as cost
+           sum(s.total) as total, sum(s.rounding) as rounding, sum(s.vat) as vat, sum(s.cost) as cost
       from sales s where s.occurred_at >= ${start} and s.occurred_at < ${end}
      group by 1 order by 1`
   const byTender = await tx`
@@ -140,13 +140,13 @@ export async function dailySales(tx: Tx, range: DayRange) {
     const gp = round2(excl - cost)
     return { total, vat: num(d.vat), excl, cost, gp, gpPct: excl ? round2((gp / excl) * 100) : null }
   }
-  const rows = days.map((d) => ({ day: d.day as string, sales: d.sales as number, refunds: d.refunds as number, ...shape(d) }))
+  const rows = days.map((d) => ({ day: d.day as string, sales: d.sales as number, refunds: d.refunds as number, rounding: num(d.rounding), ...shape(d) }))
   const totals = shape({
     total: rows.reduce((a, r) => a + r.total, 0), vat: rows.reduce((a, r) => a + r.vat, 0), cost: rows.reduce((a, r) => a + r.cost, 0),
   })
   return {
     range, rows,
-    totals: { sales: rows.reduce((a, r) => a + r.sales, 0), refunds: rows.reduce((a, r) => a + r.refunds, 0), ...totals },
+    totals: { sales: rows.reduce((a, r) => a + r.sales, 0), refunds: rows.reduce((a, r) => a + r.refunds, 0), rounding: round2(rows.reduce((a, r) => a + r.rounding, 0)), ...totals },
     byTender: byTender.map((t) => ({ tender: t.tender as string, amount: num(t.amount) })),
     byAssistant: byAssistant.map((a) => ({ name: a.name as string, sales: a.sales as number, total: num(a.total), gp: round2(num(a.gp)) })),
   }

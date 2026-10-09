@@ -161,7 +161,7 @@ export function cashupRoutes() {
         {s.late.count > 0 && <div class="msg err">{s.late.count} sale(s) or entries reached the server after this run was cashed up ({money(s.late.total)} in sales). They are included below, so the surplus now shows them.</div>}
         <div class="stats">
           <div class="stat"><b>{s.sales.count}</b><span>sales{s.sales.refunds ? `, ${s.sales.refunds} refunds` : ''}</span></div>
-          {!hide && <div class="stat"><b>{money(s.sales.total)}</b><span>takings incl VAT ({money(s.sales.vat)} VAT)</span></div>}
+          {!hide && <div class="stat"><b>{money(s.sales.total)}</b><span>takings incl VAT ({money(s.sales.vat)} VAT){s.sales.rounding !== 0 && `, cash rounding ${money(s.sales.rounding)}`}</span></div>}
           <div class="stat"><b>{money(s.pettyCash)}</b><span>petty cash paid out</span></div>
           {s.surplus !== null && <div class="stat"><b class={s.surplus < 0 ? 'neg' : s.surplus > 0 ? 'pos' : ''}>{money(s.surplus)}</b><span>{s.surplus < 0 ? 'short' : s.surplus > 0 ? 'over' : 'balanced'}</span></div>}
         </div>

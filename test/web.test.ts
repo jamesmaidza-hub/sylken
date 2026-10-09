@@ -68,6 +68,7 @@ describe('web', () => {
     const cat = await (await get('/api/till/catalogue')).json() as any
     const it = cat.items.find((x: any) => x.i === item.id)
     expect(it).toMatchObject({ c: '6001', p: 17.1, n: 24, l: true, b: ['6009876543210'] })
+    expect(cat.tenant).toMatchObject({ cashRounding: 0.05, vatRate: 0.14 })
     const tillId = cat.tills[0].id
     const runId = crypto.randomUUID()
     const saleId = crypto.randomUUID()
