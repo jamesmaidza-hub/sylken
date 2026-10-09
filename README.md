@@ -2,7 +2,7 @@
 
 Pharmacy stock, till and dispensing software for Botswana, built to replace Compharm (RxWin, StockWin, POSWin) and to be sold to other pharmacies later.
 
-This is **stage 1: items and stock**. It runs beside Compharm as a test system, fed from Compharm's report exports, until dispensing, the till and BOMAid claims are built (see `docs/plan.md`).
+Built so far: **stage 1, items and stock**, and **stage 2, till and cash-up**. It runs beside Compharm as a test system, fed from Compharm's report exports, until dispensing and BOMAid claims are built too (see `docs/plan.md`).
 
 ## What stage 1 does
 
@@ -14,7 +14,19 @@ This is **stage 1: items and stock**. It runs beside Compharm as a test system, 
 - **Min/max ordering**: the same rule as Compharm (every item at or below min, order up to max), exact and whole-pack quantities, CSV download, plus suggested levels from average daily usage.
 - **Reports**: stock value, negative stock, dormant stock, adjustments, GP exceptions, quarantined items, stock card and price history per item.
 - **Compharm import**: item list, min/max, 12-month usage and monthly sales exports.
-- **Keyboard first**: F2 items, F3 receive, F4 stock take, F6 order, F7 reports, F8 settings, `/` to search, arrows and Enter to pick. A scanned barcode opens the item directly.
+- **Keyboard first**: F2 items, F3 receive, F4 stock take, F6 order, F7 reports, F8 settings, F9 till, F10 cash-up, `/` to search, arrows and Enter to pick. A scanned barcode opens the item directly.
+
+## What stage 2 adds: the till and cash-up
+
+- **Till screen** (`/till/`, F9): scan or search, `3*code` for three packs, `15u*code` for loose units, F4 quantity, F6 price change or discount %, F5 pay, F8 refund, F9 petty cash, F10 payment on an account, F12 reprint the slip. Slips print on an 80 mm printer through the browser.
+- **Tenders**: cash (with change, rounded to 5 thebe), card, cheque, EFT / direct bank, customer account (within its credit limit) and medical aid, split any way on one sale. Slips show the VAT included and the shop's VAT number.
+- **Works offline.** The till keeps the item list, its open run and every sale in the browser, and sends them when the server can be reached. Each sale has an id the till made, so a sale sent twice is recorded once. Sales are recorded even if the item was quarantined or stock would go negative, because they already happened. Anything the server can't accept is kept under Cash-up → till problems, never dropped.
+- **Till runs**: each drawer session is a numbered run with its opening float. A run can be opened while offline.
+- **Cash-up** (F10): count cash, card batch and cheques per run; sylken shows expected against counted and the surplus or shortage per tender. Assistants count blind: the expected figures appear once the run is closed. A sale that reaches the server after its run was cashed up is kept, flagged as late and shown on the run.
+- **Sales summary** laid out like POSWin's: cash analysis per run (cash, card, cheques, total till, counted, surplus, direct bank, assistants), then the payments, bank deposit and turnover blocks, with warnings for runs not cashed up or late sales.
+- **Customer accounts**: account sales and payments at the till, statements, corrections, and a debtors age analysis.
+- **Reports**: daily sales (takings, VAT, cost, GP, by tender and assistant) and sales GP per item with discounts given, both with CSV. Trading days are counted in the shop's own time zone (Africa/Gaborone).
+- **Sales are never edited or deleted**; a mistake is put right with a refund.
 
 ## Checked against Compharm
 
@@ -39,7 +51,7 @@ Dormant items appear in an export but had no stock, sales or purchases in the la
 
 **Built for many pharmacies from day one.** Every table carries a `tenant_id`, and PostgreSQL row-level security means one pharmacy's session cannot read or write another's rows, even through a bug in a query. Shop rules (VAT, default markup, rounding, negative stock, min/max days, the highest believable cost) are settings per pharmacy, not code. Items whose Compharm price doesn't follow the shop's default markup keep their own markup, so re-pricing on receipt doesn't move prices the shop set on purpose.
 
-**Ready for offline tills.** Movements carry an id the till can create itself. The till (stage 2) will record sales while offline and send them to `POST /api/movements` when it reconnects; sending the same movement twice records it once.
+**Offline tills.** The till is a small browser app (`src/web/till/`) with a service worker, so the page itself loads without internet once it has been opened. It sends what it recorded to `POST /api/till/sync` in the order it happened; runs, sales and till entries carry ids the till made, so resending is harmless. Service workers need HTTPS (Caddy provides it) or `localhost`.
 
 **Units, not fractional packs.** Compharm shows stock like "0.53 packs". sylken stores 53 units and shows "53/100". Min/max levels stay fractional because Compharm calculates them from usage.
 
@@ -77,9 +89,10 @@ Tests run against a real PostgreSQL database that is recreated each run. Pharmac
 
 ```
 migrations/         SQL schema, applied in order
-src/domain/         business rules: items, stock ledger, receiving, stock take, min/max, reports, settings, auth
+src/domain/         business rules: items, stock ledger, receiving, stock take, min/max, till, cash-up, accounts, sales reports, settings, auth
 src/import/         Compharm export readers and the import
 src/web/            screens (Hono JSX) and the JSON API
+src/web/till/       the till app that runs in the browser (plain JavaScript, no build step) and its service worker
 src/cli/            migrate, create tenant, import, check min/max
 test/               automated tests
 docs/plan.md        stages and open questions

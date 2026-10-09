@@ -21,5 +21,6 @@ export async function newTenant(db: Sql, password = 'secret-pass-1') {
   const slug = `t-${randomUUID().slice(0, 8)}`
   const email = `${slug}@example.test`
   const id = await createTenant(db, { slug, name: `Pharmacy ${slug}`, owner: { email, name: 'Owner', password } })
-  return { id, slug, email, password, as: <T>(fn: (tx: Tx) => Promise<T>) => withTenant(db, id, fn) }
+  const [owner] = await withTenant(db, id, (tx) => tx`select id from users`)
+  return { id, slug, email, password, userId: owner.id as string, as: <T>(fn: (tx: Tx) => Promise<T>) => withTenant(db, id, fn) }
 }

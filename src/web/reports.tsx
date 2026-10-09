@@ -2,6 +2,9 @@ import { Hono } from 'hono'
 import { num } from '../db/index.js'
 import { applyMinMaxSuggestions, minMaxOrderReport, suggestMinMax } from '../domain/minmax.js'
 import * as reports from '../domain/reports.js'
+import { dailySales, itemGp } from '../domain/sales.js'
+import { tenderLabels, type Tender } from '../domain/till.js'
+import { rangeFrom, RangeForm } from './cashup.js'
 import { back, page, requireRole, run, type Env } from './app.js'
 import { dateTime, money, qty } from './layout.js'
 
@@ -16,6 +19,10 @@ export function reportRoutes() {
       <h1>Reports</h1>
       <div class="stats">
         {[
+          ['/reports/sales', 'Daily sales', 'Takings, VAT, cost and GP per day, by tender and assistant'],
+          ['/reports/sales-gp', 'Sales GP per item', 'What sold, at what margin, and discounts given'],
+          ['/cashup', 'Cash-up', 'Cash analysis per till run, payments, bank deposit and turnover'],
+          ['/accounts/aging', 'Debtors age analysis', 'What customer accounts owe, by age'],
           ['/reports/minmax', 'Min/max order', 'Items at or below minimum, with order quantities'],
           ['/reports/minmax/suggest', 'Min/max from usage', 'Suggested levels from average daily sales'],
           ['/reports/valuation', 'Stock value', 'Stock on hand at cost and at retail'],
@@ -149,6 +156,70 @@ export function reportRoutes() {
     return page(c, 'Quarantined items', simple('Quarantined items', ['Code', 'Description', '#Cost', '#Retail', 'Why'], rows,
       (x) => [x.stock_code, x.description, x.cost_per_pack === null ? '' : money(num(x.cost_per_pack)), money(num(x.retail_per_pack)), x.status_reason],
       'These came in from Compharm with missing or impossible values. They stay searchable but cannot be sold until fixed and set to active.'))
+  })
+
+  r.get('/sales', async (c) => {
+    const range = await rangeFrom(c)
+    const d = await run(c, (tx) => dailySales(tx, range))
+    if (c.req.query('format') === 'csv') {
+      c.header('content-type', 'text/csv')
+      c.header('content-disposition', `attachment; filename="daily-sales-${range.from}-${range.to}.csv"`)
+      return c.body(csv([
+        ['Date', 'Sales', 'Refunds', 'Total incl VAT', 'VAT', 'Excl VAT', 'Cost', 'GP', 'GP %'],
+        ...d.rows.map((x) => [x.day, x.sales, x.refunds, x.total.toFixed(2), x.vat.toFixed(2), x.excl.toFixed(2), x.cost.toFixed(2), x.gp.toFixed(2), x.gpPct]),
+      ]))
+    }
+    const t = d.totals
+    return page(c, 'Daily sales', (
+      <>
+        <div class="row"><h1>Daily sales</h1><span class="spacer" /><a class="btn secondary" href={`?from=${range.from}&to=${range.to}&format=csv`}>Download CSV</a></div>
+        <RangeForm {...range} />
+        <div class="wrap"><table>
+          <thead><tr><th>Date</th><th class="n">Sales</th><th class="n">Refunds</th><th class="n">Total incl VAT</th><th class="n">VAT</th><th class="n">Excl VAT</th><th class="n">Cost</th><th class="n">GP</th><th class="n">GP %</th></tr></thead>
+          <tbody>{d.rows.map((x) => (
+            <tr><td>{x.day}</td><td class="n">{x.sales}</td><td class="n">{x.refunds || ''}</td><td class="n">{money(x.total)}</td><td class="n">{money(x.vat)}</td>
+              <td class="n">{money(x.excl)}</td><td class="n">{money(x.cost)}</td><td class="n">{money(x.gp)}</td><td class="n">{x.gpPct === null ? '' : `${x.gpPct.toFixed(1)}%`}</td></tr>
+          ))}</tbody>
+          <tfoot><tr><td><b>Total</b></td><td class="n">{t.sales}</td><td class="n">{t.refunds || ''}</td><td class="n"><b>{money(t.total)}</b></td><td class="n">{money(t.vat)}</td>
+            <td class="n">{money(t.excl)}</td><td class="n">{money(t.cost)}</td><td class="n"><b>{money(t.gp)}</b></td><td class="n">{t.gpPct === null ? '' : `${t.gpPct.toFixed(1)}%`}</td></tr></tfoot>
+        </table></div>
+        <p class="hint">GP is on the price excluding VAT, at each item's average cost when it was sold.
+          {t.rounding !== 0 && ` Cash rounding to the nearest 5 thebe came to ${money(t.rounding)} over these days; it is in the tenders but not in sales or VAT.`}</p>
+        <div class="blocks">
+          <div class="block"><h3>By tender</h3><table class="sumtab">{d.byTender.map((x) => <tr><td>{tenderLabels[x.tender as Tender] ?? x.tender}</td><td class="n">{money(x.amount)}</td></tr>)}</table></div>
+          <div class="block"><h3>By assistant</h3><table class="sumtab">{d.byAssistant.map((x) => <tr><td>{x.name} <span class="muted">({x.sales})</span></td><td class="n">{money(x.total)}</td></tr>)}</table></div>
+        </div>
+      </>
+    ))
+  })
+
+  r.get('/sales-gp', async (c) => {
+    const range = await rangeFrom(c)
+    const rows = await run(c, (tx) => itemGp(tx, range))
+    if (c.req.query('format') === 'csv') {
+      c.header('content-type', 'text/csv')
+      c.header('content-disposition', `attachment; filename="sales-gp-${range.from}-${range.to}.csv"`)
+      return c.body(csv([
+        ['Stock code', 'Description', 'Units', 'Packs', 'Total incl VAT', 'Excl VAT', 'Cost', 'GP', 'GP %', 'Discount given'],
+        ...rows.map((x) => [x.stockCode, x.description, x.units, +(x.units / x.packSize).toFixed(3), x.total.toFixed(2), x.excl.toFixed(2), x.cost.toFixed(2), x.gp.toFixed(2), x.gpPct, x.discount.toFixed(2)]),
+      ]))
+    }
+    const sum = rows.reduce((a, x) => ({ excl: a.excl + x.excl, gp: a.gp + x.gp, discount: a.discount + x.discount }), { excl: 0, gp: 0, discount: 0 })
+    return page(c, 'Sales GP per item', (
+      <>
+        <div class="row"><h1>Sales GP per item</h1><span class="spacer" /><a class="btn secondary" href={`?from=${range.from}&to=${range.to}&format=csv`}>Download CSV</a></div>
+        <RangeForm {...range} />
+        <p class="muted">{rows.length} items sold for {money(sum.excl)} excl VAT, GP {money(sum.gp)}{sum.excl ? ` (${((sum.gp / sum.excl) * 100).toFixed(1)}%)` : ''}; {money(sum.discount)} given in price changes.</p>
+        <div class="wrap"><table>
+          <thead><tr><th>Code</th><th>Description</th><th class="n">Qty</th><th class="n">Excl VAT</th><th class="n">Cost</th><th class="n">GP</th><th class="n">GP %</th><th class="n">Discount</th></tr></thead>
+          <tbody>{rows.map((x) => (
+            <tr data-href={`/items/${x.itemId}`}><td>{x.stockCode}</td><td>{x.description}{x.missingCost && <span class="neg" title="No cost on record when sold"> no cost</span>}</td>
+              <td class="n">{qty(x.units, x.packSize)}</td><td class="n">{money(x.excl)}</td><td class="n">{money(x.cost)}</td>
+              <td class={`n ${x.gp < 0 ? 'neg' : ''}`}>{money(x.gp)}</td><td class="n">{x.gpPct === null ? '' : `${x.gpPct.toFixed(1)}%`}</td><td class="n">{x.discount ? money(x.discount) : ''}</td></tr>
+          ))}</tbody>
+        </table></div>
+      </>
+    ))
   })
 
   return r

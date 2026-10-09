@@ -4,8 +4,8 @@ sylken can only replace Compharm once dispensing, stock, the till and BOMAid cla
 
 | Stage | Scope | Done when |
 |---|---|---|
-| **1. Items and stock** (this release) | Item master, stock ledger in units, Compharm import, receiving, stock take, adjustments, min/max | The 30 Sep exports load cleanly and the min/max order report matches Compharm's ✅ |
-| 2. Till and cash-up | Offline-capable till (browser app that syncs movements), tenders, till runs, cash-up, petty cash, daily sales and GP | A full day can be rung up and cashed up |
+| **1. Items and stock** | Item master, stock ledger in units, Compharm import, receiving, stock take, adjustments, min/max | The 30 Sep exports load cleanly and the min/max order report matches Compharm's ✅ |
+| **2. Till and cash-up** (this release) | Offline-capable till, tenders, till runs, cash-up, petty cash, customer accounts, daily sales and GP | A full day can be rung up and cashed up ✅ (tested with the Friends item list in a browser, including a spell offline) |
 | 3. Dispensing | Patients, members and dependants, doctors, scripts, labels, allergies, owed items, repeats, schedule register | A script is dispensed end to end with stock deducted |
 | 4. BOMAid claims | Claim files, member updates, real-time adjudication if offered, claim reports | BOMAid's test environment accepts claims |
 | 5. Switchover | Full migration, final stock take, training, parallel run | Compharm is switched off |
@@ -21,6 +21,21 @@ sylken can only replace Compharm once dispensing, stock, the till and BOMAid cla
 - **Imported markups are kept per item** where they differ from the shop default (837 of the imported items at Friends), so re-pricing on receipt doesn't change them.
 - **GP is shown on the price excluding VAT.** Compharm's GP % includes VAT in the price, so sylken's figures are lower for the same item.
 - **No licensed reference data ships with sylken.** Each pharmacy's own item list is imported into its own tenant.
+
+## Decisions taken in stage 2
+
+- **The till is a browser app that works offline.** Item list, open run and sales are kept in the browser and sent when the server can be reached; ids made by the till make resending safe. A run can be opened offline; its number is given when it reaches the server.
+- **A sale is recorded whatever the stock or item state says**, because it already happened. It is never edited or deleted; refunds put things right.
+- **Tenders**: cash, card, cheque, EFT / direct bank, account and medical aid. Vouchers and loyalty points wait until after switchover.
+- **Cash-up counts cash, card batch and cheques**; EFT is checked against the bank statement. Assistants count blind.
+- **Late sales** (reaching the server after their run is cashed up) are kept, flagged and shown on the run, so a till that was offline at closing shows up as a difference rather than vanishing.
+- **Sales summary** follows POSWin's layout: "cash sales" means everything paid at the till (cash, card, cheque, EFT), and runs are picked by the day they opened.
+- **Medical aid at the till** is recorded as a tender with the scheme and member number. Claims come in stage 4.
+- **Cash is rounded to 5 thebe** (james, 9 Oct 2026). Only the cash that settles a sale is rounded; the rounding is kept beside the sale, so sales and VAT stay exact and the drawer count matches. The step is a setting.
+- **Till slips show the VAT included** (what james said BURS needs), with the shop's VAT number from Settings.
+- **One till** at Friends for now (T1 is created for every pharmacy); more can be added under Cash-up.
+- **Credit limits**: Friends has no customer accounts yet but will use them with limits. The till refuses an account sale that would take the customer over the limit, using the balance from its last item-list refresh plus what it has rung up since. A sale that arrives from an offline till is still recorded.
+- **Line prices** are the units as a fraction of the pack price, so whole packs are exact. A changed price keeps the list price beside it, and the GP report shows discounts given.
 
 ## Open questions
 

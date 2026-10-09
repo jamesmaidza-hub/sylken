@@ -27,6 +27,7 @@ const guarded = new Set<MovementKind>(['sale', 'dispense', 'adjustment', 'suppli
 export interface PostOptions {
   userId?: string | null
   allowNegative?: boolean    // a pharmacist or owner overriding the negative-stock block
+  happened?: boolean         // a sale that already took place (offline till): record it whatever the item's state
 }
 
 /** Post movements to the ledger. Returns the ids that were newly recorded. */
@@ -44,11 +45,11 @@ export async function postMovements(tx: Tx, movements: MovementInput[], opts: Po
     const lvl = byId.get(m.itemId)
     if (!lvl) throw new DomainError(`unknown item ${m.itemId}`, 'not_found', 404)
     if (!Number.isInteger(m.qtyUnits) || m.qtyUnits === 0) throw new DomainError('quantity must be a non-zero whole number of units')
-    if ((m.kind === 'sale' || m.kind === 'dispense') && lvl.status === 'quarantined') {
+    if ((m.kind === 'sale' || m.kind === 'dispense') && lvl.status === 'quarantined' && !opts.happened) {
       throw new DomainError(`${lvl.code} is quarantined and can't be sold until its record is fixed`, 'quarantined', 409)
     }
     const after = lvl.onHand + m.qtyUnits
-    if (m.qtyUnits < 0 && guarded.has(m.kind) && after < 0 && !settings.allowNegativeStock && !opts.allowNegative) {
+    if (m.qtyUnits < 0 && guarded.has(m.kind) && after < 0 && !settings.allowNegativeStock && !opts.allowNegative && !opts.happened) {
       throw new DomainError(`${lvl.code}: only ${lvl.onHand} units on hand`, 'insufficient_stock', 409)
     }
     const [row] = await tx`
