@@ -831,10 +831,11 @@ function LabelSheet({ labels, shop, settings }: { labels: Label[]; shop: { name:
 *{box-sizing:border-box}body{margin:0;font:9pt/1.2 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;color:#000;background:#fff}
 .label{width:${w}mm;height:${h}mm;padding:2mm 3mm;overflow:hidden;page-break-after:always;display:flex;flex-direction:column;gap:.6mm}
 .label:last-child{page-break-after:auto}
-.shop{font-size:7pt;display:flex;justify-content:space-between;border-bottom:.2mm solid #000;padding-bottom:.4mm}
-.top{display:flex;justify-content:space-between;font-weight:700}
+.shop{font-size:7pt;display:flex;justify-content:space-between;gap:2mm;border-bottom:.2mm solid #000;padding-bottom:.4mm}
+.top{display:flex;justify-content:space-between;gap:2mm;font-weight:700}
+.shop span:last-child,.top span:last-child{white-space:nowrap}
 .item{font-weight:700;font-size:9.5pt}.dir{font-size:10pt;flex:1}
-.foot{font-size:6.5pt;display:flex;justify-content:space-between;gap:2mm}
+.foot{font-size:6.5pt;display:flex;flex-direction:column;gap:.3mm}
 @media screen{body{background:#ddd;padding:12px;display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;align-content:flex-start}.label{background:#fff;box-shadow:0 1px 4px #0003}.bar{width:100%}}
 @media print{.bar{display:none}}`
   return (

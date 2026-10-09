@@ -8,8 +8,8 @@ alter table tenant_settings
   add column default_supply_days integer not null default 30,
   add column repeat_valid_days   integer not null default 180,           -- repeats may be dispensed this long after the script date
   add column register_schedules  smallint[] not null default '{}',       -- schedules kept in the controlled-medicine register
-  add column label_width_mm      integer not null default 70,
-  add column label_height_mm     integer not null default 36,
+  add column label_width_mm      integer not null default 59,
+  add column label_height_mm     integer not null default 46,
   add column label_footer        text default 'Keep out of reach of children';
 
 -- The shop's own list of medical aids. Claim rules and fee models come with stage 4.
