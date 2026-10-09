@@ -78,7 +78,7 @@ export function api() {
     const data = await run(c, async (tx) => {
       const settings = await getSettings(tx)
       const items = await tx`
-        select i.id, i.stock_code, i.description, i.retail_per_pack, i.pack_size, i.sell_loose, i.status, i.vat_rate,
+        select i.id, i.stock_code, i.description, i.retail_per_pack, i.pack_size, i.sell_loose, i.status, i.vat_rate, i.nappi_code,
                coalesce(s.on_hand_units, 0) as on_hand_units,
                coalesce((select array_agg(b.barcode) from item_barcodes b where b.item_id = i.id), '{}') as barcodes
           from items i left join stock_levels s on s.item_id = i.id
@@ -97,7 +97,7 @@ export function api() {
         })),
         items: items.map((i) => ({
           i: i.id, c: i.stock_code, d: i.description, p: Number(i.retail_per_pack), n: i.pack_size, l: i.sell_loose, s: Number(i.on_hand_units),
-          ...(i.barcodes.length ? { b: i.barcodes } : {}), ...(i.vat_rate !== null ? { v: Number(i.vat_rate) } : {}), ...(i.status === 'dormant' ? { z: 1 } : {}),
+          ...(i.barcodes.length ? { b: i.barcodes } : {}), ...(i.vat_rate !== null ? { v: Number(i.vat_rate) } : {}), ...(i.nappi_code ? { x: i.nappi_code } : {}), ...(i.status === 'dormant' ? { z: 1 } : {}),
         })),
         at: new Date().toISOString(),
       }

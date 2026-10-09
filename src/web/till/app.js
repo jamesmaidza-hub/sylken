@@ -48,6 +48,7 @@
     for (const it of cat.items) {
       byCode.set(it.c.toUpperCase(), it)
       for (const b of it.b || []) byCode.set(b.toUpperCase(), it)
+      if (it.x && !byCode.has(it.x)) byCode.set(it.x, it)          // NAPPI code
     }
   }
 
