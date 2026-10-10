@@ -245,9 +245,13 @@ async function shapePatient(tx: Tx, input: PatientInput, id?: string) {
     if (!ma) throw new DomainError('unknown medical aid', 'not_found', 404)
     if (!memberNo) throw new DomainError('a medical aid member needs a member number')
     dependantCode = dependantCode ?? '00'
-  } else {
-    memberNo = null
+  } else if (!memberNo) {
     dependantCode = null
+  }
+  // A private account keeps its account number (from Compharm) in member_no, so search by number finds the family.
+  if (dependantCode) {
+    if (!/^\d{1,2}$/.test(dependantCode)) throw new DomainError('the dependant code is a number: 00 for the main member, 01 for the first dependant')
+    dependantCode = dependantCode.padStart(2, '0')
   }
   if (input.doctorId) {
     const [d] = await tx`select id from doctors where id = ${input.doctorId}`

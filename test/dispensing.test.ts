@@ -56,6 +56,18 @@ describe('patients', () => {
     await expect(t.as((tx) => updatePatient(tx, mainId, { surname: 'SETSHEDI', mainMemberId: depId }))).rejects.toThrow()
   })
 
+  it('keeps a private account number and lets the dependant code be corrected', async () => {
+    const mainId = await t.as((tx) => createPatient(tx, { surname: 'KGOSI', memberNo: 'acc-42', dependantCode: '0' }))
+    expect((await t.as((tx) => getPatient(tx, mainId)))).toMatchObject({ medicalAidName: null, memberNo: 'ACC-42', dependantCode: '00' })
+    const depId = await t.as((tx) => createPatient(tx, { surname: 'Kgosi', firstNames: 'Lesedi', mainMemberId: mainId }))
+    await t.as((tx) => updatePatient(tx, mainId, { surname: 'KGOSI', firstNames: 'Neo', memberNo: 'ACC-42', dependantCode: '00' }))
+    expect((await t.as((tx) => getPatient(tx, mainId)))!.memberNo).toBe('ACC-42')
+    expect((await t.as((tx) => searchPatients(tx, 'acc-42'))).length).toBe(2)
+    await t.as((tx) => updatePatient(tx, depId, { surname: 'KGOSI', firstNames: 'Lesedi', mainMemberId: mainId, dependantCode: '3' }))
+    expect((await t.as((tx) => getPatient(tx, depId)))!.dependantCode).toBe('03')
+    await expect(t.as((tx) => updatePatient(tx, depId, { surname: 'KGOSI', mainMemberId: mainId, dependantCode: 'A1' }))).rejects.toThrow(/dependant code/)
+  })
+
   it('expands direction codes and flags allergies written like the item name', async () => {
     expect(await t.as((tx) => expandDirections(tx, '1t3d'))).toBe('Take ONE tablet THREE times a day')
     expect(await t.as((tx) => expandDirections(tx, 'Two puffs when needed'))).toBe('Two puffs when needed')
