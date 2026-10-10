@@ -14,6 +14,7 @@
     "tenant:create": "tsx src/cli/create-tenant.ts",
     "import:compharm": "tsx src/cli/import-compharm.ts",
     "check:minmax": "tsx src/cli/check-minmax.ts",
+    "user:reset": "tsx src/cli/reset-login.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },

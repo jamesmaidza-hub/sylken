@@ -2,6 +2,8 @@ import type { Child } from 'hono/jsx'
 import { raw } from 'hono/html'
 import type { SessionUser } from '../domain/auth.js'
 import { formatPacks } from '../domain/units.js'
+import { security } from '../security/config.js'
+import { can, roleLabels, type Permission } from '../security/roles.js'
 
 export const money = (n: number | null | undefined) =>
   n === null || n === undefined ? '' : `${n < 0 ? '-' : ''}P${Math.abs(n).toLocaleString('en-BW', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -16,19 +18,24 @@ export const date = (d: Date | string | null | undefined) =>
 export const dateTime = (d: Date | string | null | undefined) =>
   d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
 
-const nav: [string, string, string][] = [
-  ['F2', 'Stock', '/items'],
-  ['F3', 'Receive', '/receiving'],
-  ['F4', 'Stock take', '/stocktakes'],
-  ['F5', 'Dispensary', '/dispensary'],
-  ['F6', 'Order', '/reports/minmax'],
-  ['F7', 'Reports', '/reports'],
-  ['F8', 'Settings', '/settings'],
-  ['F9', 'Till', '/till/'],
-  ['F10', 'Cash-up', '/cashup'],
-  ['', 'Sales', '/sales'],
-  ['', 'Accounts', '/accounts'],
+const nav: [string, string, string, Permission][] = [
+  ['F2', 'Stock', '/items', 'items.view'],
+  ['F3', 'Receive', '/receiving', 'stock.receive'],
+  ['F4', 'Stock take', '/stocktakes', 'stock.adjust'],
+  ['F5', 'Dispensary', '/dispensary', 'rx.view'],
+  ['F6', 'Order', '/reports/minmax', 'stock.reports'],
+  ['F7', 'Reports', '/reports', 'stock.reports'],
+  ['F8', 'Settings', '/settings', 'settings.manage'],
+  ['F9', 'Till', '/till/', 'till.use'],
+  ['F10', 'Cash-up', '/cashup', 'cashup.own'],
+  ['', 'Sales', '/sales', 'sales.view'],
+  ['', 'Accounts', '/accounts', 'accounts.view'],
+  ['', 'Users', '/users', 'users.manage'],
 ]
+
+// An unattended screen logs itself out, so patient details are not left showing.
+const idleLock = `(()=>{let t;const reset=()=>{clearTimeout(t);t=setTimeout(()=>{location.href='/logout?idle=1'},${security.idleMinutes * 60_000})};
+['mousemove','mousedown','keydown','touchstart','scroll'].forEach(e=>addEventListener(e,reset,{passive:true}));reset()})()`
 
 const css = `
 :root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2330;--muted:#5d6676;--line:#dde1e7;--accent:#0d6b5e;--accent-ink:#fff;--warn:#a5530a;--bad:#b42318;--good:#18794e;--chip:#eef1f4}
@@ -171,12 +178,12 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
           <header>
             <a class="brand" href="/">sylken</a>
             <nav>
-              {nav.map(([k, label, href]) => (
+              {nav.filter(([, , , perm]) => can(props.user!.roles, perm)).map(([k, label, href]) => (
                 <a href={href} class={href === current(props.path) ? 'on' : ''}>{k && <kbd>{k}</kbd>}{label}</a>
               ))}
             </nav>
             <button type="button" id="touch-toggle" class="secondary" style="padding:4px 10px;font-size:13px" title="Bigger buttons for a touch screen">Touch screen</button>
-            <span class="who" title={`${props.user.tenantName} · ${props.user.role}`}>{props.user.name} · <a href="/logout">Log out</a></span>
+            <span class="who" title={`${props.user.tenantName} · ${props.user.roles.map((r) => roleLabels[r]).join(', ')}`}><a href="/me">{props.user.name}</a> · <a href="/logout">Log out</a></span>
           </header>
         )}
         <main>
@@ -186,6 +193,7 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
         </main>
         <script>{raw(keys)}</script>
         <script>{raw(touch)}</script>
+        {props.user && <script>{raw(idleLock)}</script>}
       </body>
     </html>
   )

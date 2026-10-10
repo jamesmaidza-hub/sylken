@@ -1,5 +1,6 @@
 import type { Sql } from '../db/index.js'
 import { withTenant } from '../db/index.js'
+import type { Role } from '../security/roles.js'
 import { hashPassword } from './auth.js'
 import { defaultDirections } from './patients.js'
 import { defaultAdjustmentReasons } from './stock.js'
@@ -9,7 +10,8 @@ export interface NewTenant {
   name: string
   address?: string
   phone?: string
-  owner: { email: string; name: string; password: string }
+  /** The first login. Its roles default to pharmacist + manager, the usual owner-pharmacist. */
+  owner: { email: string; name: string; password: string; roles?: Role[] }
 }
 
 /** A new pharmacy: tenant row, default settings, adjustment reasons, label directions, its first owner login and one till. */
@@ -21,7 +23,8 @@ export async function createTenant(db: Sql, input: NewTenant): Promise<string> {
     for (const [code, label] of defaultAdjustmentReasons) {
       await tx`insert into adjustment_reasons (tenant_id, code, label) values (${t.id}, ${code}, ${label})`
     }
-    await tx`insert into users (tenant_id, email, name, role, password_hash) values (${t.id}, ${input.owner.email}, ${input.owner.name}, 'owner', ${hash})`
+    const roles = input.owner.roles ?? ['pharmacist', 'manager']
+    await tx`insert into users (tenant_id, email, name, roles, password_hash) values (${t.id}, ${input.owner.email}, ${input.owner.name}, ${roles}, ${hash})`
     await tx`insert into tills (tenant_id, code, name) values (${t.id}, 'T1', 'Till 1')`
     for (const [code, text] of defaultDirections) {
       await tx`insert into directions (tenant_id, code, text) values (${t.id}, ${code}, ${text})`
