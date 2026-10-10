@@ -3,7 +3,7 @@ import { DomainError } from '../domain/errors.js'
 import { listSales, salesSummary, shopToday } from '../domain/sales.js'
 import { getSettings } from '../domain/settings.js'
 import { closeRun, countedTenders, createTill, listTills, runSummary, tenderLabels, type Tender } from '../domain/till.js'
-import { back, page, requireRole, run, type Ctx, type Env } from './app.js'
+import { back, can, page, run, type Ctx, type Env } from './app.js'
 import { dateTime, money } from './layout.js'
 
 /** Today in the shop's time zone, or the from/to in the query; a report can start on another default. */
@@ -141,14 +141,13 @@ export function cashupRoutes() {
   })
 
   r.post('/tills', async (c) => {
-    requireRole(c, ['owner'])
     const b = await c.req.parseBody()
     await run(c, (tx) => createTill(tx, { code: String(b.code ?? ''), name: String(b.name ?? '') }, c.get('user').userId))
     return back(c, '/cashup', { ok: 'Till added. Choose it on the till screen of that computer.' })
   })
 
   r.get('/runs/:id', async (c) => {
-    const blind = c.get('user').role === 'assistant'
+    const blind = !can(c, 'cashup.manage')
     const { s, sales, entries, defaultFloat } = await run(c, async (tx) => {
       const s = await runSummary(tx, c.req.param('id'))
       if (!s) throw new DomainError('unknown till run', 'not_found', 404)
@@ -271,7 +270,6 @@ export function cashupRoutes() {
   })
 
   r.post('/problems/:id/resolve', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     await run(c, (tx) => tx`update till_rejects set resolved = true where id = ${c.req.param('id')}`)
     return back(c, '/cashup/problems', { ok: 'Marked as sorted' })
   })

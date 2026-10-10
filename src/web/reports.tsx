@@ -5,7 +5,7 @@ import * as reports from '../domain/reports.js'
 import { dailySales, itemGp } from '../domain/sales.js'
 import { tenderLabels, type Tender } from '../domain/till.js'
 import { rangeFrom, RangeForm } from './cashup.js'
-import { back, page, requireRole, run, type Env } from './app.js'
+import { back, page, run, type Env } from './app.js'
 import { rxReportList, rxReportRoutes } from './rxreports.js'
 import { tillReportList, tillReportRoutes } from './tillreports.js'
 import { dateTime, money, qty } from './layout.js'
@@ -103,7 +103,6 @@ export function reportRoutes() {
   })
 
   r.post('/minmax/apply', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     const n = await run(c, (tx) => applyMinMaxSuggestions(tx, { overwrite: b.overwrite === 'on' }, c.get('user').userId))
     return back(c, '/reports/minmax/suggest', { ok: `Levels updated on ${n} items` })

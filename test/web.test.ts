@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Sql } from '../src/db/index.js'
 import { createItem } from '../src/domain/items.js'
 import { createApp } from '../src/web/app.js'
-import { appDb, newTenant } from './helpers.js'
+import { appDb, newTenant, webLogin } from './helpers.js'
 
 let db: Sql
 beforeAll(() => { db = appDb() })
@@ -11,9 +11,7 @@ afterAll(async () => { await db.end() })
 async function loggedIn() {
   const t = await newTenant(db)
   const app = createApp(db)
-  const res = await app.request('/login', { method: 'POST', body: new URLSearchParams({ email: t.email, password: t.password }) })
-  expect(res.status).toBe(302)
-  const cookie = res.headers.get('set-cookie')!.split(';')[0]
+  const cookie = await webLogin(app, t.email, t.password)
   const get = (path: string) => app.request(path, { headers: { cookie } })
   const post = (path: string, body: Record<string, string>) => app.request(path, { method: 'POST', headers: { cookie }, body: new URLSearchParams(body) })
   return { t, app, cookie, get, post }

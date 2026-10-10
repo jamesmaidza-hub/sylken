@@ -574,7 +574,8 @@
     try {
       const batch = outbox.slice(0, 100)
       const res = await fetch('/api/till/sync', {
-        method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin',
+        // Polling with nothing to send is not activity, so it doesn't keep an idle login alive.
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-sylken-background': batch.length ? '0' : '1' }, credentials: 'same-origin',
         body: JSON.stringify({ tillId, deviceId, pending: outbox.length, runIds: run ? [run.id] : [], ops: batch }),
       })
       if (res.status === 401) { setOnline(true); banner('Your login has expired. <a href="/login">Log in again</a>; sales rung up meanwhile are kept on this till.', true); return }
@@ -614,7 +615,7 @@
   async function refreshCatalogue() {
     const started = Date.now()
     try {
-      const res = await fetch('/api/till/catalogue', { credentials: 'same-origin' })
+      const res = await fetch('/api/till/catalogue', { credentials: 'same-origin', headers: { 'x-sylken-background': '1' } })
       if (res.status === 401) { banner('Your login has expired. <a href="/login">Log in again</a>.', true); return }
       if (!res.ok) throw new Error()
       cat = await res.json()

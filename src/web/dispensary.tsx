@@ -13,20 +13,20 @@ import {
   register, removeLine, reverseScript, scriptBook, scriptIdByNo, scriptWarnings, setSupply, startRepeat, supplyOwed, updateDraft, type Label,
 } from '../domain/scripts.js'
 import { getSettings, getShop, nextScriptNo, setNextScriptNo, updateSettings, updateShop } from '../domain/settings.js'
-import { back, page, requireRole, run, type Ctx, type Env } from './app.js'
+import { checkScript, scriptCheck } from '../domain/checks.js'
+import { back, can, page, requirePermission, run, type Env } from './app.js'
 import { RangeForm, rangeFrom } from './cashup.js'
 import { date, dateTime, money } from './layout.js'
 import { download, formatHref, type Col } from './export.js'
 
 /**
  * The dispensary: find or add a patient, capture a script, check it, dispense it, print labels.
- * Assistants may capture scripts; a pharmacist or the owner dispenses, reverses and hands over
- * owed items.
+ * Who may do each step is set in src/security/routes.ts: dispensers capture and dispense,
+ * only pharmacists override a warning, reverse a script or check someone else's.
  */
 
 const str = (v: unknown) => String(v ?? '').trim()
 const intOrNull = (v: unknown) => (str(v) === '' ? null : Number(str(v)))
-const pharmacist = (c: Ctx) => ['owner', 'pharmacist'].includes(c.get('user').role)
 
 // Suggests items as the name is typed; the field still accepts a scanned barcode or a stock code.
 const itemPicker = `
@@ -436,7 +436,7 @@ export function dispensaryRoutes() {
         <LabelLink id={c.req.query('label')} />
         {data.owed.length > 0 && <>
           <h2>Owed to this patient</h2>
-          <OwedTable owed={data.owed} canSupply={pharmacist(c)} />
+          <OwedTable owed={data.owed} canSupply={can(c, 'rx.dispense')} />
         </>}
         <h2 id="scripts">Scripts</h2>
         {data.scripts.length
@@ -494,7 +494,6 @@ export function dispensaryRoutes() {
   })
 
   r.post('/flags/:id/remove', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const pid = await run(c, (tx) => removeFlag(tx, c.req.param('id'), c.get('user').userId))
     return back(c, `/dispensary/patients/${pid}`, { ok: 'Removed' })
   })
@@ -557,13 +556,16 @@ export function dispensaryRoutes() {
          group by d.code, d.text order by count(l.id) desc, d.code limit 16` : []
       const [acct] = s.patient.accountId
         ? await tx`select coalesce(sum(amount), 0) as b from account_entries where account_id = ${s.patient.accountId}` : []
+      const [by] = await tx`select dispensed_by from scripts where id = ${s.id}`
       return { s, settings, flags, balance: acct ? Number(acct.b) : null, warnings: s.status === 'draft' ? scriptWarnings(s, flags, settings) : [],
+        check: await scriptCheck(tx, s.id), dispensedBy: (by?.dispensed_by ?? null) as string | null,
         doctors: await listDoctors(tx, '', { activeOnly: true }), directions: await listDirections(tx),
         topDirections: topDirections.map((d) => ({ code: d.code as string, text: d.text as string })) }
     })
     const { s, warnings, settings } = data
     const draft = s.status === 'draft'
-    const canDispense = pharmacist(c)
+    const canDispense = can(c, 'rx.dispense')
+    const canOverride = can(c, 'rx.override')
     const needsConfirm = warnings.some((w) => w.level === 'confirm')
     const needsStock = warnings.some((w) => w.level === 'stock')
     const blocked = warnings.some((w) => w.level === 'block')
@@ -704,7 +706,9 @@ export function dispensaryRoutes() {
             <div class={w.level === 'block' ? 'neg' : w.level === 'info' ? 'muted' : ''} style="margin:2px 0">
               {w.level === 'block' ? '⛔ ' : w.level === 'info' ? 'ℹ ' : '⚠ '}{w.lineNo ? `Line ${w.lineNo}: ` : ''}{w.text}</div>
           ))}</div>}
-          {canDispense
+          {canDispense && (needsConfirm || needsStock) && !canOverride
+            ? <p class="muted">A pharmacist must dispense this script, because of the warnings above.</p>
+            : canDispense
             ? <form method="post" action={`/dispensary/scripts/${s.id}/dispense`} class="panel row">
                 {needsConfirm && <label class="row" style="flex-direction:row"><input type="checkbox" name="confirmed" required /> I have checked the allergies and alerts above</label>}
                 {needsStock && <label class="row" style="flex-direction:row"><input type="checkbox" name="allowNegative" /> Stock count is wrong: dispense anyway</label>}
@@ -724,7 +728,16 @@ export function dispensaryRoutes() {
             <h2>Repeats</h2>
             <ul>{s.repeats.map((x) => <li><a href={`/dispensary/scripts/${x.id}`}>{x.scriptNo ? `Script ${x.scriptNo}` : 'Draft repeat'}</a> {x.status} {dateTime(x.dispensedAt)}</li>)}</ul>
           </>}
-          {s.status === 'dispensed' && canDispense && (
+          <h2>Check</h2>
+          {data.check
+            ? <p>Checked by <b>{data.check.checkedByName}</b> on {dateTime(data.check.checkedAt)}.</p>
+            : s.status !== 'dispensed' ? <p class="muted">Not checked.</p>
+            : can(c, 'rx.check') && data.dispensedBy !== c.get('user').userId
+            ? <form method="post" action={`/dispensary/scripts/${s.id}/check`} class="panel row">
+                <span>Dispensed by {s.dispensedBy}. Check every label, item, strength and quantity against the prescription.</span><span class="spacer" />
+                <button>I have checked this script</button></form>
+            : <p class="muted">Not checked yet. A pharmacist other than the person who dispensed it checks it.</p>}
+          {s.status === 'dispensed' && can(c, 'rx.reverse') && (
             <details><summary>Reverse this script</summary>
               <form method="post" action={`/dispensary/scripts/${s.id}/reverse`} class="grid panel">
                 <label>Why<input name="reason" required placeholder="e.g. wrong strength captured" /></label>
@@ -785,11 +798,17 @@ export function dispensaryRoutes() {
   })
 
   r.post('/scripts/:id/dispense', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
+    if (b.confirmed === 'on' || b.allowNegative === 'on') requirePermission(c, 'rx.override', 'Only a pharmacist can dispense past a warning.')
     const id = c.req.param('id')
     const { scriptNo } = await run(c, (tx) => dispenseScript(tx, id, { confirmed: b.confirmed === 'on', allowNegative: b.allowNegative === 'on' }, c.get('user').userId))
     return back(c, `/dispensary/scripts/${id}`, { ok: `Dispensed as script ${scriptNo}. Print the labels, then ring it up at the till.` })
+  })
+
+  r.post('/scripts/:id/check', async (c) => {
+    const id = c.req.param('id')
+    await run(c, (tx) => checkScript(tx, id, c.get('user').userId))
+    return back(c, `/dispensary/scripts/${id}`, { ok: 'Checked' })
   })
 
   r.post('/scripts/:id/discard', async (c) => {
@@ -798,7 +817,6 @@ export function dispensaryRoutes() {
   })
 
   r.post('/scripts/:id/reverse', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     await run(c, (tx) => reverseScript(tx, c.req.param('id'), str(b.reason), c.get('user').userId))
     return back(c, `/dispensary/scripts/${c.req.param('id')}`, { ok: 'Script reversed; its stock is back on the shelf' })
@@ -834,21 +852,20 @@ export function dispensaryRoutes() {
         <h1>Owed items</h1>
         <LabelLink id={c.req.query('label')} />
         <p class="muted">What dispensed scripts still owe patients. Hand it over here when stock arrives, then print a label for what was given.</p>
-        <OwedTable owed={owed} canSupply={pharmacist(c)} showPatient />
+        <OwedTable owed={owed} canSupply={can(c, 'rx.dispense')} showPatient />
       </>
     ))
   })
 
   r.post('/owed/:id/supply', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
+    if (b.allowNegative === 'on') requirePermission(c, 'rx.override', 'Only a pharmacist can hand over past a stock warning.')
     const supplyId = await run(c, (tx) => supplyOwed(tx, c.req.param('id'), Number(str(b.units)), { allowNegative: b.allowNegative === 'on' }, c.get('user').userId))
     const from = str(b.from) || '/dispensary/owed'
     return back(c, `${from}${from.includes('?') ? '&' : '?'}label=${supplyId}`, { ok: 'Handed over' })
   })
 
   r.post('/owed/:id/cancel', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     await run(c, (tx) => cancelOwed(tx, c.req.param('id'), str(b.reason), c.get('user').userId))
     return back(c, str(b.from) || '/dispensary/owed', { ok: 'Owed item cancelled' })
@@ -1014,7 +1031,6 @@ export function dispensaryRoutes() {
   })
 
   r.post('/settings', async (c) => {
-    requireRole(c, ['owner'])
     const b = await c.req.parseBody()
     const schedules = str(b.schedules).split(/[\s,]+/).filter(Boolean).map(Number)
     if (schedules.some((n) => !Number.isInteger(n) || n < 0 || n > 9)) throw new DomainError('schedules are whole numbers from 0 to 9')
@@ -1036,21 +1052,18 @@ export function dispensaryRoutes() {
   })
 
   r.post('/settings/aids', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     await run(c, (tx) => saveMedicalAid(tx, { name: str(b.name), code: str(b.code) }, c.get('user').userId))
     return back(c, '/dispensary/settings', { ok: 'Medical aid added' })
   })
 
   r.post('/settings/aids/:id', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     await run(c, (tx) => saveMedicalAid(tx, { id: c.req.param('id'), name: str(b.name), code: str(b.code), message: str(b.message), active: b.inactive !== 'on' }, c.get('user').userId))
     return back(c, '/dispensary/settings', { ok: 'Saved' })
   })
 
   r.post('/settings/directions', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     await run(c, (tx) => saveDirection(tx, str(b.code), str(b.text), c.get('user').userId))
     return back(c, '/dispensary/settings', { ok: 'Directions saved' })

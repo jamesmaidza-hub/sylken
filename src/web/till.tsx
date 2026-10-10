@@ -37,7 +37,7 @@ export function tillRoutes() {
 
 function tillPage(c: Ctx) {
   const u = c.get('user')
-  const boot = JSON.stringify({ tenantId: u.tenantId, tenantName: u.tenantName, user: { id: u.userId, name: u.name, role: u.role } })
+  const boot = JSON.stringify({ tenantId: u.tenantId, tenantName: u.tenantName, user: { id: u.userId, name: u.name, roles: u.roles } })
   return c.html(
     <html lang="en">
       <head>

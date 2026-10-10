@@ -8,7 +8,7 @@ import { itemMovements } from '../domain/reports.js'
 import { getSettings } from '../domain/settings.js'
 import { adjustStock } from '../domain/stock.js'
 import { packsToUnits } from '../domain/units.js'
-import { back, page, requireRole, run, type Env } from './app.js'
+import { back, page, run, type Env } from './app.js'
 import { dateTime, money, pct, qty, StatusChip } from './layout.js'
 
 /** Link to an item that keeps the search it was found by, so the results stay on screen above it. */
@@ -249,7 +249,6 @@ export function itemRoutes() {
   })
 
   r.post('/:id/adjust', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     const id = c.req.param('id')
     await run(c, async (tx) => {

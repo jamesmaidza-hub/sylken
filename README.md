@@ -88,7 +88,15 @@ npm start                       # http://localhost:3000
 
 The import only runs into an empty pharmacy, and by default skips item-list lines that appear in no other export; new items come in on supplier invoices. `import-report.json` lists every item it quarantined or had questions about.
 
-To deploy on a server: set `POSTGRES_PASSWORD`, `APP_DB_PASSWORD` and `DOMAIN`, then `docker compose up -d` and `docker compose run --rm app npm run migrate`.
+### Logins and roles
+
+Each person has their own login with one or more roles: counter assistant, dispenser, pharmacist, manager. What each role may do is in `src/security/roles.ts`, and the permission every screen needs is in `src/security/routes.ts`; a screen missing from that table is refused. The first login made by `tenant:create` is pharmacist + manager. Managers add the others under **Users**.
+
+Pharmacists and managers set up an authenticator app (Google or Microsoft Authenticator) at their first login and get ten one-time recovery codes. If the only manager is locked out or loses their phone and codes, whoever runs the server can run `npm run user:reset -- --email you@example.com --unlock --reset-2fa`.
+
+Authenticator secrets are encrypted with a key kept outside the database: `SYLKEN_DATA_KEY` if set, otherwise `data/sylken.key`, created on first use. **Back that key up separately from the database**; without it nobody can log in with their authenticator, and everything encrypted with it later is lost. Security requirements and what is and isn't covered: `docs/security/requirements.md`.
+
+To deploy on a server: set `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `SYLKEN_DATA_KEY` (`openssl rand -base64 32`) and `DOMAIN`, then `docker compose up -d` and `docker compose run --rm app npm run migrate`.
 
 ## Tests
 
