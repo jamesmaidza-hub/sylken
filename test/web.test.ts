@@ -35,9 +35,24 @@ describe('web', () => {
       '/till/', '/till/app.js', '/till/sw.js', '/cashup', '/cashup/problems', '/sales', '/accounts', '/accounts/aging', '/reports/sales', '/reports/sales-gp',
       '/reports/sales?format=csv', '/reports/sales-gp?format=csv', '/dispensary', '/dispensary?q=smith', '/dispensary/patients/new',
       '/dispensary/scripts', '/dispensary/scripts?format=csv', '/dispensary/owed', '/dispensary/register', '/dispensary/register?format=csv',
-      '/dispensary/doctors', '/dispensary/settings']) {
+      '/dispensary/doctors', '/dispensary/settings', '/dispensary/scripts?format=xlsx', '/dispensary/register?format=xlsx', '/reports/rx']) {
       const res = await get(p)
       expect(res.status, p).toBe(200)
+    }
+  })
+
+  it('serves every dispensary report on screen, as CSV and as Excel', async () => {
+    const { get } = await loggedIn()
+    for (const p of ['/reports/rx/drug-usage', '/reports/rx/scripts', '/reports/rx/scripts?by=aid', '/reports/rx/scripts?by=doctor',
+      '/reports/rx/scripts?by=dispenser', '/reports/rx/patients', '/reports/rx/patients?all=on&aid=private', '/reports/rx/last-visit',
+      '/reports/rx/repeats', '/reports/rx/price-changes', '/reports/rx/reversed']) {
+      expect((await get(p)).status, p).toBe(200)
+      const sep = p.includes('?') ? '&' : '?'
+      const c = await get(`${p}${sep}format=csv`)
+      expect(c.headers.get('content-type'), p).toMatch(/text\/csv/)
+      const x = await get(`${p}${sep}format=xlsx&from=2026-01-01&to=2026-01-31`)
+      expect(x.headers.get('content-disposition'), p).toMatch(/2026-01-01-2026-01-31\.xlsx/)
+      expect(Buffer.from(await x.arrayBuffer()).subarray(0, 2).toString(), p).toBe('PK')
     }
   })
 

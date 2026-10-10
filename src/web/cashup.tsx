@@ -6,23 +6,35 @@ import { closeRun, countedTenders, createTill, listTills, runSummary, tenderLabe
 import { back, page, requireRole, run, type Ctx, type Env } from './app.js'
 import { dateTime, money } from './layout.js'
 
-/** Today in the shop's time zone, or the from/to in the query. */
-export async function rangeFrom(c: Ctx) {
+/** Today in the shop's time zone, or the from/to in the query; a report can start on another default. */
+export async function rangeFrom(c: Ctx, dflt?: (today: string) => { from: string; to: string }) {
   const tz = (await run(c, getSettings)).timezone
   const today = shopToday(tz)
-  return { from: c.req.query('from') || today, to: c.req.query('to') || c.req.query('from') || today, today }
+  const d = dflt ? dflt(today) : { from: today, to: today }
+  const from = c.req.query('from') || (c.req.query('to') ? c.req.query('to')! : d.from)
+  return { from, to: c.req.query('to') || (c.req.query('from') ? from : d.to), today }
 }
+
+/** YYYY-MM-DD plus or minus days. */
+export const shiftDay = (iso: string, days: number) => new Date(Date.parse(iso + 'T00:00:00Z') + days * 86400_000).toISOString().slice(0, 10)
+/** The first of the month the date falls in. */
+export const monthStart = (iso: string) => iso.slice(0, 8) + '01'
+export const thisMonth = (today: string) => ({ from: monthStart(today), to: today })
 
 const signed = (n: number | null) => (n === null ? '' : <span class={n < 0 ? 'neg' : n > 0 ? 'pos' : ''}>{money(n)}</span>)
 
-export function RangeForm(props: { from: string; to: string; today: string; extra?: any }) {
+export function RangeForm(props: { from: string; to: string; today: string; extra?: any; keep?: string }) {
+  const k = props.keep ? `&${props.keep}` : ''
+  const lastEnd = shiftDay(monthStart(props.today), -1)
   return (
     <form class="row panel">
       <label class="f">From<input type="date" name="from" value={props.from} /></label>
       <label class="f">To<input type="date" name="to" value={props.to} /></label>
       {props.extra}
       <button class="secondary">Show</button>
-      <a class="btn secondary" href={`?from=${props.today}&to=${props.today}`}>Today</a>
+      <a class="btn secondary" href={`?from=${props.today}&to=${props.today}${k}`}>Today</a>
+      <a class="btn secondary" href={`?from=${monthStart(props.today)}&to=${props.today}${k}`}>This month</a>
+      <a class="btn secondary" href={`?from=${monthStart(lastEnd)}&to=${lastEnd}${k}`}>Last month</a>
     </form>
   )
 }
