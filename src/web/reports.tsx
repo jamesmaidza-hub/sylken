@@ -7,9 +7,10 @@ import { tenderLabels, type Tender } from '../domain/till.js'
 import { rangeFrom, RangeForm } from './cashup.js'
 import { back, page, requireRole, run, type Env } from './app.js'
 import { rxReportList, rxReportRoutes } from './rxreports.js'
+import { tillReportList, tillReportRoutes } from './tillreports.js'
 import { dateTime, money, qty } from './layout.js'
 
-import { csv } from './export.js'
+import { csv, download, formatHref } from './export.js'
 
 export function reportRoutes() {
   const r = new Hono<Env>()
@@ -33,6 +34,10 @@ export function reportRoutes() {
           ['/reports/quarantine', 'Quarantined items', 'Imported records that need fixing before sale'],
         ].map(([href, title, desc]) => <a class="stat" href={href}><b style="font-size:16px">{title}</b><span>{desc}</span></a>)}
       </div>
+      <h2 id="till">Till and accounts</h2>
+      <div class="stats">
+        {tillReportList.map(([href, title, desc]) => <a class="stat" href={href}><b style="font-size:16px">{title}</b><span>{desc}</span></a>)}
+      </div>
       <h2 id="dispensary">Dispensary</h2>
       <div class="stats">
         {rxReportList.map(([href, title, desc]) => <a class="stat" href={href}><b style="font-size:16px">{title}</b><span>{desc}</span></a>)}
@@ -41,6 +46,7 @@ export function reportRoutes() {
   )))
 
   r.route('/rx', rxReportRoutes())
+  r.route('/till', tillReportRoutes())
 
   r.get('/minmax', async (c) => {
     const bin = c.req.query('bin') || undefined
@@ -167,18 +173,16 @@ export function reportRoutes() {
   r.get('/sales', async (c) => {
     const range = await rangeFrom(c)
     const d = await run(c, (tx) => dailySales(tx, range))
-    if (c.req.query('format') === 'csv') {
-      c.header('content-type', 'text/csv')
-      c.header('content-disposition', `attachment; filename="daily-sales-${range.from}-${range.to}.csv"`)
-      return c.body(csv([
-        ['Date', 'Sales', 'Refunds', 'Total incl VAT', 'VAT', 'Excl VAT', 'Cost', 'GP', 'GP %'],
-        ...d.rows.map((x) => [x.day, x.sales, x.refunds, x.total.toFixed(2), x.vat.toFixed(2), x.excl.toFixed(2), x.cost.toFixed(2), x.gp.toFixed(2), x.gpPct]),
-      ]))
-    }
+    const dl = await download(c, `daily-sales-${range.from}-${range.to}`, 'Daily sales', [
+      { h: 'Date', v: (x) => x.day }, { h: 'Sales', v: (x) => x.sales, fmt: 'int' }, { h: 'Refunds', v: (x) => x.refunds, fmt: 'int' },
+      { h: 'Total incl VAT', v: (x) => x.total, fmt: 'money' }, { h: 'VAT', v: (x) => x.vat, fmt: 'money' }, { h: 'Excl VAT', v: (x) => x.excl, fmt: 'money' },
+      { h: 'Cost', v: (x) => x.cost, fmt: 'money' }, { h: 'GP', v: (x) => x.gp, fmt: 'money' }, { h: 'GP %', v: (x) => x.gpPct, fmt: 'pct' },
+    ], d.rows)
+    if (dl) return dl
     const t = d.totals
     return page(c, 'Daily sales', (
       <>
-        <div class="row"><h1>Daily sales</h1><span class="spacer" /><a class="btn secondary" href={`?from=${range.from}&to=${range.to}&format=csv`}>Download CSV</a></div>
+        <div class="row"><h1>Daily sales</h1><span class="spacer" /><a class="btn secondary" href={formatHref(c, 'xlsx')}>Download Excel</a><a class="btn secondary" href={formatHref(c, 'csv')}>Download CSV</a></div>
         <RangeForm {...range} />
         <div class="wrap"><table>
           <thead><tr><th>Date</th><th class="n">Sales</th><th class="n">Refunds</th><th class="n">Total incl VAT</th><th class="n">VAT</th><th class="n">Excl VAT</th><th class="n">Cost</th><th class="n">GP</th><th class="n">GP %</th></tr></thead>
@@ -202,18 +206,17 @@ export function reportRoutes() {
   r.get('/sales-gp', async (c) => {
     const range = await rangeFrom(c)
     const rows = await run(c, (tx) => itemGp(tx, range))
-    if (c.req.query('format') === 'csv') {
-      c.header('content-type', 'text/csv')
-      c.header('content-disposition', `attachment; filename="sales-gp-${range.from}-${range.to}.csv"`)
-      return c.body(csv([
-        ['Stock code', 'Description', 'Units', 'Packs', 'Total incl VAT', 'Excl VAT', 'Cost', 'GP', 'GP %', 'Discount given'],
-        ...rows.map((x) => [x.stockCode, x.description, x.units, +(x.units / x.packSize).toFixed(3), x.total.toFixed(2), x.excl.toFixed(2), x.cost.toFixed(2), x.gp.toFixed(2), x.gpPct, x.discount.toFixed(2)]),
-      ]))
-    }
+    const dl = await download(c, `sales-gp-${range.from}-${range.to}`, 'Sales GP per item', [
+      { h: 'Stock code', v: (x) => x.stockCode }, { h: 'Description', v: (x) => x.description }, { h: 'Units', v: (x) => x.units, fmt: 'int' },
+      { h: 'Packs', v: (x) => +(x.units / x.packSize).toFixed(3), fmt: 'qty' }, { h: 'Total incl VAT', v: (x) => x.total, fmt: 'money' },
+      { h: 'Excl VAT', v: (x) => x.excl, fmt: 'money' }, { h: 'Cost', v: (x) => x.cost, fmt: 'money' }, { h: 'GP', v: (x) => x.gp, fmt: 'money' },
+      { h: 'GP %', v: (x) => x.gpPct, fmt: 'pct' }, { h: 'Discount given', v: (x) => x.discount, fmt: 'money' },
+    ], rows)
+    if (dl) return dl
     const sum = rows.reduce((a, x) => ({ excl: a.excl + x.excl, gp: a.gp + x.gp, discount: a.discount + x.discount }), { excl: 0, gp: 0, discount: 0 })
     return page(c, 'Sales GP per item', (
       <>
-        <div class="row"><h1>Sales GP per item</h1><span class="spacer" /><a class="btn secondary" href={`?from=${range.from}&to=${range.to}&format=csv`}>Download CSV</a></div>
+        <div class="row"><h1>Sales GP per item</h1><span class="spacer" /><a class="btn secondary" href={formatHref(c, 'xlsx')}>Download Excel</a><a class="btn secondary" href={formatHref(c, 'csv')}>Download CSV</a></div>
         <RangeForm {...range} />
         <p class="muted">{rows.length} items sold for {money(sum.excl)} excl VAT, GP {money(sum.gp)}{sum.excl ? ` (${((sum.gp / sum.excl) * 100).toFixed(1)}%)` : ''}; {money(sum.discount)} given in price changes.</p>
         <div class="wrap"><table>

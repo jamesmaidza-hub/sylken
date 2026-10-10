@@ -50,7 +50,8 @@ export function accountRoutes() {
       { balance: 0, current: 0, d30: 0, d60: 0, d90: 0 })
     return page(c, 'Age analysis', (
       <>
-        <h1>Debtors age analysis</h1>
+        <div class="row"><h1>Debtors age analysis</h1><span class="spacer" /><a class="btn secondary" href="/reports/till/debtors">As at a date, with downloads</a>
+          <a class="btn secondary" href="/reports/till/statements">Statements</a></div>
         <p class="muted">Payments clear the oldest charges first. Days are counted from the sale.</p>
         <div class="wrap"><table>
           <thead><tr><th>Account</th><th>Name</th><th class="n">Current</th><th class="n">31-60 days</th><th class="n">61-90 days</th><th class="n">Over 90</th><th class="n">Balance</th><th class="n">Limit</th></tr></thead>

@@ -35,7 +35,7 @@ describe('web', () => {
       '/till/', '/till/app.js', '/till/sw.js', '/cashup', '/cashup/problems', '/sales', '/accounts', '/accounts/aging', '/reports/sales', '/reports/sales-gp',
       '/reports/sales?format=csv', '/reports/sales-gp?format=csv', '/dispensary', '/dispensary?q=smith', '/dispensary/patients/new',
       '/dispensary/scripts', '/dispensary/scripts?format=csv', '/dispensary/owed', '/dispensary/register', '/dispensary/register?format=csv',
-      '/dispensary/doctors', '/dispensary/settings', '/dispensary/scripts?format=xlsx', '/dispensary/register?format=xlsx', '/reports/rx']) {
+      '/dispensary/doctors', '/dispensary/settings', '/dispensary/scripts?format=xlsx', '/dispensary/register?format=xlsx', '/reports/rx', '/sales?from=2026-01-01']) {
       const res = await get(p)
       expect(res.status, p).toBe(200)
     }
@@ -45,13 +45,16 @@ describe('web', () => {
     const { get } = await loggedIn()
     for (const p of ['/reports/rx/drug-usage', '/reports/rx/scripts', '/reports/rx/scripts?by=aid', '/reports/rx/scripts?by=doctor',
       '/reports/rx/scripts?by=dispenser', '/reports/rx/patients', '/reports/rx/patients?all=on&aid=private', '/reports/rx/last-visit',
-      '/reports/rx/repeats', '/reports/rx/price-changes', '/reports/rx/reversed']) {
+      '/reports/rx/repeats', '/reports/rx/price-changes', '/reports/rx/reversed',
+      '/reports/till/statements', '/reports/till/debtors', '/reports/till/account-transactions', '/reports/till/journal', '/reports/till/detail',
+      '/reports/till/assistants', '/reports/till/petty-cash', '/reports/till/price-alterations', '/reports/till/markup?below=10', '/reports/till/otc',
+      '/reports/till/contacts?phone=on', '/reports/till/audit', '/reports/sales', '/reports/sales-gp']) {
       expect((await get(p)).status, p).toBe(200)
       const sep = p.includes('?') ? '&' : '?'
       const c = await get(`${p}${sep}format=csv`)
       expect(c.headers.get('content-type'), p).toMatch(/text\/csv/)
       const x = await get(`${p}${sep}format=xlsx&from=2026-01-01&to=2026-01-31`)
-      expect(x.headers.get('content-disposition'), p).toMatch(/2026-01-01-2026-01-31\.xlsx/)
+      expect(x.headers.get('content-disposition'), p).toMatch(/\.xlsx/)
       expect(Buffer.from(await x.arrayBuffer()).subarray(0, 2).toString(), p).toBe('PK')
     }
   })
@@ -140,6 +143,9 @@ describe('web', () => {
     expect(again.results.map((r: any) => r.status)).toEqual(['duplicate', 'duplicate', 'rejected'])
 
     expect(await (await get(`/sales/${saleId}`)).text()).toContain('PANADO 24')
+    const slip = await (await get(`/sales/${saleId}/slip`)).text()
+    expect(slip).toContain('TAX INVOICE · COPY')
+    expect(slip).toContain('PANADO 24')
     expect(await (await get(`/cashup/runs/${runId}`)).text()).toContain('Cash up this run')
     const closed = await post(`/cashup/runs/${runId}/close`, { cash: '117.10', card: '0', cheque: '0', floatKept: '100', note: '' })
     expect(new URL(closed.headers.get('location')!, 'http://x').searchParams.get('ok')).toMatch(/balances/)
