@@ -16,7 +16,7 @@ import { getSettings, getShop, nextScriptNo, setNextScriptNo, updateSettings, up
 import { back, page, requireRole, run, type Ctx, type Env } from './app.js'
 import { RangeForm, rangeFrom } from './cashup.js'
 import { date, dateTime, money } from './layout.js'
-import { csv } from './reports.js'
+import { download, formatHref, type Col } from './export.js'
 
 /**
  * The dispensary: find or add a patient, capture a script, check it, dispense it, print labels.
@@ -172,7 +172,23 @@ const scriptKeys = (patientId: string) => `
 })()`
 
 /** A row of big picture buttons across the top of the dispensary screens. */
-function RxToolbar({ on, patientId }: { on?: string; patientId?: string }) {
+const scriptBookCols: Col<Awaited<ReturnType<typeof scriptBook>>[number]>[] = [
+  { h: 'Script', v: (s) => s.scriptNo, fmt: 'int' }, { h: 'Dispensed', v: (s) => dateTime(s.dispensedAt) }, { h: 'Script date', v: (s) => s.rxDate },
+  { h: 'Status', v: (s) => s.status + (s.repeat ? ' (repeat)' : '') }, { h: 'Patient', v: (s) => s.patientName }, { h: 'ID', v: (s) => s.idNo },
+  { h: 'Doctor', v: (s) => s.doctorName }, { h: 'Medical aid', v: (s) => s.medicalAid }, { h: 'Member', v: (s) => s.memberNo }, { h: 'Items', v: (s) => s.items },
+  { h: 'Total', v: (s) => s.total, fmt: 'money' }, { h: 'Claim', v: (s) => s.claimTotal, fmt: 'money' }, { h: 'Patient pays', v: (s) => s.patientTotal, fmt: 'money' },
+  { h: 'Paid at till', v: (s) => s.paid, fmt: 'money' }, { h: 'Dispensed by', v: (s) => s.dispensedBy },
+]
+
+type RegisterItem = Awaited<ReturnType<typeof register>>['items'][number]
+const registerCols: Col<{ i: RegisterItem; e: RegisterItem['entries'][number] }>[] = [
+  { h: 'Item', v: ({ i }) => `${i.stockCode} ${i.description}` }, { h: 'Schedule', v: ({ i }) => i.schedule, fmt: 'int' }, { h: 'Date', v: ({ e }) => dateTime(e.at) },
+  { h: 'Entry', v: ({ e }) => e.what }, { h: 'Patient', v: ({ e }) => e.patient }, { h: 'Patient ID', v: ({ e }) => e.patientIdNo },
+  { h: 'Patient address', v: ({ e }) => e.patientAddress }, { h: 'Doctor', v: ({ e }) => e.doctor }, { h: 'In', v: ({ e }) => e.inUnits || null, fmt: 'int' },
+  { h: 'Out', v: ({ e }) => e.outUnits || null, fmt: 'int' }, { h: 'Balance', v: ({ e }) => e.balance, fmt: 'int' }, { h: 'By', v: ({ e }) => e.by },
+]
+
+export function RxToolbar({ on, patientId }: { on?: string; patientId?: string }) {
   const tools: [string, string, string, string][] = [
     ['find', '🔍', 'Find patient', '/dispensary'],
     ['new', '👤', 'New patient', '/dispensary/patients/new'],
@@ -180,6 +196,7 @@ function RxToolbar({ on, patientId }: { on?: string; patientId?: string }) {
     ['owed', '📦', 'Owed items', '/dispensary/owed'],
     ['book', '📖', 'Script book', '/dispensary/scripts'],
     ['register', '🔒', 'Register', '/dispensary/register'],
+    ['reports', '📊', 'Reports', '/reports/rx'],
     ['doctors', '🩺', 'Doctors', '/dispensary/doctors'],
     ['till', '🧾', 'Till', '/till/'],
     ['settings', '⚙️', 'Settings', '/dispensary/settings'],
@@ -499,21 +516,14 @@ export function dispensaryRoutes() {
     }
     const range = await rangeFrom(c)
     const rows = await run(c, async (tx) => scriptBook(tx, await bounds(tx, range)))
-    if (c.req.query('format') === 'csv') {
-      c.header('content-type', 'text/csv')
-      c.header('content-disposition', `attachment; filename="script-book-${range.from}-${range.to}.csv"`)
-      return c.body(csv([
-        ['Script', 'Dispensed', 'Script date', 'Status', 'Patient', 'ID', 'Doctor', 'Medical aid', 'Member', 'Items', 'Total', 'Claim', 'Patient pays', 'Paid at till', 'Dispensed by'],
-        ...rows.map((s) => [s.scriptNo, dateTime(s.dispensedAt), s.rxDate, s.status + (s.repeat ? ' (repeat)' : ''), s.patientName, s.idNo, s.doctorName,
-          s.medicalAid, s.memberNo, s.items, s.total.toFixed(2), s.claimTotal.toFixed(2), s.patientTotal.toFixed(2), s.paid.toFixed(2), s.dispensedBy]),
-      ]))
-    }
+    const dl = await download(c, `script-book-${range.from}-${range.to}`, 'Script book', scriptBookCols, rows)
+    if (dl) return dl
     const live = rows.filter((s) => s.status === 'dispensed')
     const sum = (f: (s: (typeof rows)[number]) => number) => live.reduce((a, s) => a + f(s), 0)
     return page(c, 'Script book', (
       <>
         <RxToolbar on="book" />
-        <div class="row"><h1>Script book</h1><span class="spacer" /><a class="btn secondary" href={`?from=${range.from}&to=${range.to}&format=csv`}>Download CSV</a></div>
+        <div class="row"><h1>Script book</h1><span class="spacer" /><a class="btn secondary" href={formatHref(c, 'xlsx')}>Download Excel</a><a class="btn secondary" href={formatHref(c, 'csv')}>Download CSV</a></div>
         <RangeForm {...range} />
         <p class="muted">{live.length} scripts dispensed{rows.length > live.length ? `, ${rows.length - live.length} reversed` : ''}: {money(sum((s) => s.total))} in total,
           {' '}{money(sum((s) => s.claimTotal))} to claim from medical aids, {money(sum((s) => s.patientTotal))} for patients to pay.</p>
@@ -848,20 +858,15 @@ export function dispensaryRoutes() {
     const range = await rangeFrom(c)
     const itemId = c.req.query('item') || undefined
     const reg = await run(c, async (tx) => register(tx, await bounds(tx, range), { itemId }))
-    if (c.req.query('format') === 'csv') {
-      c.header('content-type', 'text/csv')
-      c.header('content-disposition', `attachment; filename="register-${range.from}-${range.to}.csv"`)
-      return c.body(csv([
-        ['Item', 'Schedule', 'Date', 'Entry', 'Patient', 'Patient ID', 'Patient address', 'Doctor', 'In', 'Out', 'Balance', 'By'],
-        ...reg.items.flatMap((i) => i.entries.map((e) => [`${i.stockCode} ${i.description}`, i.schedule, dateTime(e.at), e.what, e.patient, e.patientIdNo,
-          e.patientAddress, e.doctor, e.inUnits || '', e.outUnits || '', e.balance, e.by])),
-      ]))
-    }
+    const dl = await download(c, `register-${range.from}-${range.to}`, 'Register', registerCols,
+      reg.items.flatMap((i) => i.entries.map((e) => ({ i, e }))))
+    if (dl) return dl
     return page(c, 'Register', (
       <>
         <RxToolbar on="register" />
         <div class="row"><h1>Register of scheduled medicines</h1><span class="spacer" />
-          <a class="btn secondary" href={`?from=${range.from}&to=${range.to}${itemId ? `&item=${itemId}` : ''}&format=csv`}>Download CSV</a>
+          <a class="btn secondary" href={formatHref(c, 'xlsx')}>Download Excel</a>
+          <a class="btn secondary" href={formatHref(c, 'csv')}>Download CSV</a>
           <button class="secondary" onclick="window.print()">Print</button></div>
         <RangeForm {...range} extra={itemId ? <input type="hidden" name="item" value={itemId} /> : undefined} />
         {!reg.schedules.length && !itemId

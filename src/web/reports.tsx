@@ -6,10 +6,10 @@ import { dailySales, itemGp } from '../domain/sales.js'
 import { tenderLabels, type Tender } from '../domain/till.js'
 import { rangeFrom, RangeForm } from './cashup.js'
 import { back, page, requireRole, run, type Env } from './app.js'
+import { rxReportList, rxReportRoutes } from './rxreports.js'
 import { dateTime, money, qty } from './layout.js'
 
-export const csv = (rows: (string | number | null)[][]) =>
-  rows.map((r) => r.map((v) => (v === null ? '' : /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g, '""')}"` : String(v))).join(',')).join('\n')
+import { csv } from './export.js'
 
 export function reportRoutes() {
   const r = new Hono<Env>()
@@ -33,8 +33,14 @@ export function reportRoutes() {
           ['/reports/quarantine', 'Quarantined items', 'Imported records that need fixing before sale'],
         ].map(([href, title, desc]) => <a class="stat" href={href}><b style="font-size:16px">{title}</b><span>{desc}</span></a>)}
       </div>
+      <h2 id="dispensary">Dispensary</h2>
+      <div class="stats">
+        {rxReportList.map(([href, title, desc]) => <a class="stat" href={href}><b style="font-size:16px">{title}</b><span>{desc}</span></a>)}
+      </div>
     </>
   )))
+
+  r.route('/rx', rxReportRoutes())
 
   r.get('/minmax', async (c) => {
     const bin = c.req.query('bin') || undefined
