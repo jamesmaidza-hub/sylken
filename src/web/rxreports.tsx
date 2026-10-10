@@ -3,56 +3,14 @@ import { listMedicalAids, ageOn } from '../domain/patients.js'
 import {
   drugUsage, lastVisit, patientList, priceChanges, priceSources, repeatsDue, reversedScripts, scriptAnalysis, type AnalysisBy,
 } from '../domain/rxreports.js'
-import { page, run, type Ctx, type Env } from './app.js'
-import { rangeFrom, RangeForm, shiftDay, thisMonth } from './cashup.js'
+import { page, run, type Env } from './app.js'
+import { rangeFrom, shiftDay, thisMonth } from './cashup.js'
 import { RxToolbar } from './dispensary.js'
-import { download, formatHref, type Col } from './export.js'
+import { download } from './export.js'
+import { file, ReportPage, type ReportProps, type ScreenCol } from './report.js'
 import { date, dateTime, money, qty } from './layout.js'
 
-/** A column on screen as well as in the download: show overrides how the cell looks. */
-type ScreenCol<T> = Col<T> & { show?: (r: T) => any }
-
-const cell = <T,>(c: ScreenCol<T>, r: T) => {
-  if (c.show) return c.show(r)
-  const v = c.v(r)
-  if (v === null || v === undefined) return ''
-  return c.fmt === 'money' ? money(Number(v)) : c.fmt === 'pct' ? `${v}%` : v
-}
-
-const numeric = (c: ScreenCol<any>) => !!c.fmt
-
-/** The page every dispensary report shares: toolbar, title, dates and filters, downloads, table. */
-function Report<T>(props: {
-  c: Ctx; title: string; intro: string; range: { from: string; to: string; today: string }; filters?: any; keep?: string
-  cols: ScreenCol<T>[]; rows: T[]; foot?: T; summary?: any; href?: (r: T) => string | undefined; hint?: string; before?: any
-}) {
-  const { c, cols } = props
-  return (
-    <>
-      <RxToolbar on="reports" />
-      <div class="row"><h1>{props.title}</h1><span class="spacer" />
-        <a class="btn secondary" href={formatHref(c, 'xlsx')}>Download Excel</a>
-        <a class="btn secondary" href={formatHref(c, 'csv')}>Download CSV</a>
-        <button class="secondary" onclick="window.print()">Print</button></div>
-      <p class="muted">{props.intro}</p>
-      <RangeForm {...props.range} extra={props.filters} keep={props.keep} />
-      {props.before}
-      <p class="muted">{props.summary ?? `${props.rows.length} rows`}</p>
-      <div class="wrap"><table>
-        <thead><tr>{cols.map((x) => <th class={numeric(x) ? 'n' : ''}>{x.h}</th>)}</tr></thead>
-        <tbody>{props.rows.map((r) => {
-          const href = props.href?.(r)
-          return <tr data-href={href}>{cols.map((x) => <td class={numeric(x) ? 'n' : ''}>{cell(x, r)}</td>)}</tr>
-        })}</tbody>
-        {props.foot && <tfoot><tr>{cols.map((x) => <td class={numeric(x) ? 'n' : ''}><b>{cell(x, props.foot!)}</b></td>)}</tr></tfoot>}
-      </table></div>
-      {!props.rows.length && <p class="muted">Nothing in this range.</p>}
-      {props.hint && <p class="hint">{props.hint}</p>}
-    </>
-  )
-}
-
-const file = (name: string, r: { from: string; to: string }) => `${name}-${r.from}-${r.to}`
+const Report = <T,>(props: Omit<ReportProps<T>, 'toolbar'>) => <ReportPage {...props} toolbar={<RxToolbar on="reports" />} />
 
 export const rxReportList: [string, string, string][] = [
   ['/reports/rx/drug-usage', 'Drug usage', 'Each medicine dispensed: scripts, patients, quantity, value and GP'],
