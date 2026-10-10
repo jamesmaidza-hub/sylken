@@ -51,6 +51,8 @@ describe('patients', () => {
     expect(fam.map((p) => p.dependantCode)).toEqual(['00', '01'])
     expect((await t.as((tx) => searchPatients(tx, 'bom-777'))).length).toBe(2)
     expect((await t.as((tx) => searchPatients(tx, 'setsh neo'))).map((p) => p.id)).toEqual([depId])
+    expect((await t.as((tx) => searchPatients(tx, 'setshedi', { mainMembersOnly: true }))).map((p) => p.id)).toEqual([mainId])
+    expect((await t.as((tx) => searchPatients(tx, 'setsh neo', { mainMembersOnly: true }))).map((p) => p.id)).toEqual([mainId])
     await expect(t.as((tx) => createPatient(tx, { surname: 'X', mainMemberId: depId }))).rejects.toThrow(/main member/)
     await expect(t.as((tx) => createPatient(tx, { surname: 'Y', medicalAidId: aidId, memberNo: 'BOM-777' }))).rejects.toThrow(/dependant/)
     await expect(t.as((tx) => updatePatient(tx, mainId, { surname: 'SETSHEDI', mainMemberId: depId }))).rejects.toThrow()

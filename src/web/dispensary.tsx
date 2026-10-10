@@ -316,7 +316,7 @@ export function dispensaryRoutes() {
   r.get('/', async (c) => {
     const q = c.req.query('q') ?? ''
     const { patients, drafts, owed, next } = await run(c, async (tx) => ({
-      patients: await searchPatients(tx, q, { limit: 50 }),
+      patients: await searchPatients(tx, q, { limit: 50, mainMembersOnly: true }),
       drafts: await draftScripts(tx),
       owed: await listOwed(tx),
       next: await nextScriptNo(tx),
