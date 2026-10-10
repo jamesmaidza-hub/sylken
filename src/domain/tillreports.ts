@@ -268,7 +268,8 @@ export async function contacts(tx: Tx, opts: { kind?: 'account' | 'patient'; wit
     select a.id, a.account_no, a.name, a.phone, a.active, coalesce((select sum(e.amount) from account_entries e where e.account_id = a.id), 0) as balance
       from customer_accounts a where ${q ? tx`upper(a.name) like ${q}` : tx`true`}`
   const patients = opts.kind === 'account' ? [] : await tx`
-    select p.id, p.title, p.first_names, p.surname, coalesce(p.phone, mm.phone) as phone, p.address, p.active, ma.name as aid_name,
+    select p.id, p.title, p.first_names, p.surname, p.main_member_id, p.dependant_code, mm.surname as mm_surname, mm.first_names as mm_first_names,
+           coalesce(p.phone, mm.phone) as phone, p.address, p.active, ma.name as aid_name,
            coalesce(mm.member_no, p.member_no) as member_no,
            (select max(s.dispensed_at) from scripts s where s.patient_id = p.id and s.status = 'dispensed') as last_visit
       from patients p left join patients mm on mm.id = p.main_member_id
@@ -276,12 +277,24 @@ export async function contacts(tx: Tx, opts: { kind?: 'account' | 'patient'; wit
      where ${q ? tx`(upper(p.surname) like ${q} or upper(coalesce(p.first_names, '')) like ${q})` : tx`true`}`
   const out = [
     ...accounts.map((a) => ({ kind: 'Account', id: a.id as string, href: `/accounts/${a.id}`, name: a.name as string, ref: a.account_no as string,
-      phone: a.phone as string | null, address: null as string | null, detail: `Owes P${num(a.balance).toFixed(2)}`, active: a.active as boolean, last: null as Date | null })),
+      phone: a.phone as string | null, address: null as string | null, detail: `Owes P${num(a.balance).toFixed(2)}`, active: a.active as boolean, last: null as Date | null,
+      sort: [String(a.name).toUpperCase()] as (string | number)[] })),
     ...patients.map((p) => ({ kind: 'Patient', id: p.id as string, href: `/dispensary/patients/${p.id}`, name: patientName(p as any),
       ref: p.member_no as string | null, phone: p.phone as string | null, address: p.address as string | null,
-      detail: (p.aid_name as string | null) ?? 'Private', active: p.active as boolean, last: p.last_visit as Date | null })),
+      detail: (p.aid_name as string | null) ?? 'Private', active: p.active as boolean, last: p.last_visit as Date | null,
+      // Families stay together, main member (00) first.
+      sort: [String(p.mm_surname ?? p.surname).toUpperCase(), String(p.mm_first_names ?? p.first_names ?? '').toUpperCase(),
+        String(p.main_member_id ?? p.id), p.main_member_id ? 1 : 0, String(p.dependant_code ?? ''), String(p.first_names ?? '').toUpperCase()] })),
   ]
-  return out.filter((x) => x.active && (!opts.withPhone || x.phone)).sort((a, b) => a.name.localeCompare(b.name))
+  const cmp = (a: (string | number)[], b: (string | number)[]) => {
+    for (let i = 0; i < Math.max(a.length, b.length); i++) {
+      const x = a[i] ?? '', y = b[i] ?? ''
+      const c = typeof x === 'number' && typeof y === 'number' ? x - y : String(x).localeCompare(String(y))
+      if (c) return c
+    }
+    return 0
+  }
+  return out.filter((x) => x.active && (!opts.withPhone || x.phone)).sort((a, b) => cmp(a.sort, b.sort)).map(({ sort: _, ...x }) => x)
 }
 
 export const auditLabels: Record<string, string> = {

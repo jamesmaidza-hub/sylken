@@ -108,7 +108,7 @@ const patientRows = (rows: any[]): PatientRow[] => rows.map((r) => ({
 }))
 
 const patientBase = (tx: Tx, b: { start: Date; end: Date }) => tx`
-  select p.id, p.title, p.first_names, p.surname, p.id_no, p.date_of_birth::text as dob, p.sex, p.phone, mm.phone as mm_phone,
+  select p.id, p.title, p.first_names, p.surname, p.main_member_id, mm.surname as mm_surname, mm.first_names as mm_first_names, p.dependant_code as own_dep, p.id_no, p.date_of_birth::text as dob, p.sex, p.phone, mm.phone as mm_phone,
          ma.name as aid_name, coalesce(mm.member_no, p.member_no) as member_no,
          coalesce(p.dependant_code, case when p.medical_aid_id is not null then '00' end) as dep_code,
          d.title as doc_title, d.initials as doc_initials, d.surname as doc_surname,
@@ -131,7 +131,8 @@ export async function patientList(tx: Tx, range: DayRange, opts: { all?: boolean
        ${opts.aidId === 'private' ? tx`and coalesce(mm.medical_aid_id, p.medical_aid_id) is null` : opts.aidId ? tx`and coalesce(mm.medical_aid_id, p.medical_aid_id) = ${opts.aidId}` : tx``}
     ) x
     ${opts.all ? tx`` : tx`where x.scripts > 0`}
-    order by upper(x.surname), upper(coalesce(x.first_names, ''))`
+    order by upper(coalesce(x.mm_surname, x.surname)), upper(coalesce(x.mm_first_names, x.first_names, '')), coalesce(x.main_member_id, x.id),
+             x.main_member_id is not null, x.own_dep nulls first, upper(coalesce(x.first_names, ''))`
   return patientRows(rows)
 }
 

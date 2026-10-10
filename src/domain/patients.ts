@@ -167,6 +167,13 @@ export async function getPatient(tx: Tx, id: string): Promise<Patient | null> {
  * Find patients by surname (start of it, or "SURNAME FIRST"), ID number, member number or phone.
  * A member number finds the whole family.
  */
+/**
+ * Lists people family by family: the main member (dependant 00) first, then 01, 02 and so on.
+ * Needs the patient as p and their main member as mm.
+ */
+export const familyOrder = (tx: Tx) => tx`upper(coalesce(mm.surname, p.surname)), upper(coalesce(mm.first_names, p.first_names, '')),
+  coalesce(p.main_member_id, p.id), p.main_member_id is not null, p.dependant_code nulls first, upper(coalesce(p.first_names, ''))`
+
 export async function searchPatients(
   tx: Tx, q: string, opts: { limit?: number; includeInactive?: boolean; mainMembersOnly?: boolean } = {},
 ): Promise<Patient[]> {
@@ -188,14 +195,14 @@ export async function searchPatients(
     : tx`${active} and ${matches}`
   const rows = await tx`${patientSelect(tx)}
      where ${where}
-     order by upper(p.surname), upper(coalesce(p.first_names, '')), p.dependant_code nulls first
+     order by ${familyOrder(tx)}
      limit ${opts.limit ?? 50}`
   return rows.map(toPatient)
 }
 
 export async function familyOf(tx: Tx, patient: Patient): Promise<Patient[]> {
   const mainId = patient.mainMemberId ?? patient.id
-  const rows = await tx`${patientSelect(tx)} where (p.id = ${mainId} or p.main_member_id = ${mainId}) order by p.main_member_id nulls first, p.dependant_code, p.first_names`
+  const rows = await tx`${patientSelect(tx)} where (p.id = ${mainId} or p.main_member_id = ${mainId}) order by ${familyOrder(tx)}`
   return rows.map(toPatient)
 }
 

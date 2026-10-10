@@ -70,6 +70,15 @@ describe('patients', () => {
     await expect(t.as((tx) => updatePatient(tx, depId, { surname: 'KGOSI', mainMemberId: mainId, dependantCode: 'A1' }))).rejects.toThrow(/dependant code/)
   })
 
+  it('lists the main member (00) first, then the dependants in code order', async () => {
+    const mainId = await member('ZWANE', 'BOM-900')
+    const d2 = await t.as((tx) => createPatient(tx, { surname: 'Zwane', firstNames: 'Amo', mainMemberId: mainId, dependantCode: '02' }))
+    const d1 = await t.as((tx) => createPatient(tx, { surname: 'Zwane', firstNames: 'Zola', mainMemberId: mainId, dependantCode: '01' }))
+    const fam = await t.as(async (tx) => familyOf(tx, (await getPatient(tx, d2))!))
+    expect(fam.map((p) => p.id)).toEqual([mainId, d1, d2])
+    expect((await t.as((tx) => searchPatients(tx, 'zwane'))).map((p) => p.id)).toEqual([mainId, d1, d2])
+  })
+
   it('expands direction codes and flags allergies written like the item name', async () => {
     expect(await t.as((tx) => expandDirections(tx, '1t3d'))).toBe('Take ONE tablet THREE times a day')
     expect(await t.as((tx) => expandDirections(tx, 'Two puffs when needed'))).toBe('Two puffs when needed')
