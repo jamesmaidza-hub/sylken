@@ -223,7 +223,7 @@ function PatientPanel({ p, flags }: { p: Patient; flags?: { kind: string; text: 
         <span class="spacer" />
         {p.medicalAidName
           ? <span>{p.medicalAidName} <b>{p.memberNo}</b>{p.dependantCode && <span class="muted"> / {p.dependantCode}</span>}{p.mainMemberName && <span class="muted"> · dependant of {p.mainMemberName}</span>}</span>
-          : <span class="muted">Private patient</span>}
+          : <span class="muted">Private patient{p.memberNo && <> · account <b>{p.memberNo}</b>{p.dependantCode && ` / ${p.dependantCode}`}</>}</span>}
       </div>
       {allergies.length > 0 && <div class="msg err" style="margin:8px 0 0">Allergies: {allergies.map((a) => <b>{a.text}{a.detail ? ` (${a.detail})` : ''} </b>)}</div>}
       {alerts.map((a) => <div class="msg warn" style="margin:8px 0 0">{a.text}</div>)}
@@ -245,6 +245,7 @@ function PatientCard({ p, flags, balance }: { p: Patient; flags: { kind: string;
         {p.phone && <><dt>Phone</dt><dd>{p.phone}</dd></>}
         {p.address && <><dt>Address</dt><dd>{p.address}</dd></>}
         <dt>Medical aid</dt><dd>{p.medicalAidName ? <>{p.medicalAidName} <b>{p.memberNo}</b>{p.dependantCode && <span class="muted"> / {p.dependantCode}</span>}</> : <span class="muted">Private</span>}</dd>
+        {!p.medicalAidName && p.memberNo && <><dt>Account no</dt><dd><b>{p.memberNo}</b>{p.dependantCode && <span class="muted"> / {p.dependantCode}</span>}</dd></>}
         {p.mainMemberName && <><dt>Main member</dt><dd>{p.mainMemberName}</dd></>}
         {p.accountName && <><dt>Account</dt><dd>{p.accountName}{balance !== null && <> · balance <b class={balance > 0 ? 'neg' : ''}>{money(balance)}</b></>}</dd></>}
       </dl>
@@ -310,7 +311,8 @@ function PatientForm(props: { action: string; p?: Patient | null; mainMember?: P
         ? <label>Dependant code<input name="dependantCode" value={p?.dependantCode ?? ''} placeholder="next free number" /></label>
         : <>
             <label>Medical aid<select name="medicalAidId"><option value="">None (private)</option>{props.aids.map((a) => <option value={a.id} selected={p?.medicalAidId === a.id}>{a.name}</option>)}</select></label>
-            <label>Member number<input name="memberNo" value={p?.memberNo ?? ''} /></label>
+            <label>Member number (account no. if private)<input name="memberNo" value={p?.memberNo ?? ''} /></label>
+            <label>Dependant code<input name="dependantCode" inputmode="numeric" value={p?.dependantCode ?? ''} placeholder="00 for the main member" /></label>
           </>}
       <label>Usual doctor<select name="doctorId"><option value=""></option>{props.doctors.map((d) => <option value={d.id} selected={p?.doctorId === d.id}>{d.name}</option>)}</select></label>
       <label>Customer account<select name="accountId"><option value="">None</option>{props.accounts.map((a) => <option value={a.id} selected={p?.accountId === a.id}>{a.name} ({a.accountNo})</option>)}</select></label>
@@ -331,7 +333,7 @@ export function dispensaryRoutes() {
   r.get('/', async (c) => {
     const q = c.req.query('q') ?? ''
     const { patients, drafts, owed, next } = await run(c, async (tx) => ({
-      patients: await searchPatients(tx, q, { limit: 50 }),
+      patients: await searchPatients(tx, q, { limit: 50, mainMembersOnly: true }),
       drafts: await draftScripts(tx),
       owed: await listOwed(tx),
       next: await nextScriptNo(tx),

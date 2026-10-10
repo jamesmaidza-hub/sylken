@@ -167,20 +167,27 @@ export async function getPatient(tx: Tx, id: string): Promise<Patient | null> {
  * Find patients by surname (start of it, or "SURNAME FIRST"), ID number, member number or phone.
  * A member number finds the whole family.
  */
-export async function searchPatients(tx: Tx, q: string, opts: { limit?: number; includeInactive?: boolean } = {}): Promise<Patient[]> {
+export async function searchPatients(
+  tx: Tx, q: string, opts: { limit?: number; includeInactive?: boolean; mainMembersOnly?: boolean } = {},
+): Promise<Patient[]> {
   const term = q.trim()
   if (!term) return []
   const upper = term.toUpperCase()
   const [surname, ...rest] = upper.split(/[\s,]+/).filter(Boolean)
   const first = rest.join(' ')
-  const rows = await tx`${patientSelect(tx)}
-     where ${opts.includeInactive ? tx`true` : tx`p.active`}
-       and (
+  const active = opts.includeInactive ? tx`true` : tx`p.active`
+  const matches = tx`(
          (upper(p.surname) like ${surname + '%'} ${first ? tx`and upper(coalesce(p.first_names, '')) like ${first + '%'}` : tx``})
          or upper(p.id_no) = ${upper}
          or upper(coalesce(mm.member_no, p.member_no)) = ${upper}
          or regexp_replace(coalesce(p.phone, ''), '\\D', '', 'g') = ${term.replace(/\D/g, '') || '-'}
-       )
+       )`
+  // A dependant who matches is shown as their main member, so each family appears once.
+  const where = opts.mainMembersOnly
+    ? tx`p.id in (select coalesce(p.main_member_id, p.id) from patients p left join patients mm on mm.id = p.main_member_id where ${active} and ${matches})`
+    : tx`${active} and ${matches}`
+  const rows = await tx`${patientSelect(tx)}
+     where ${where}
      order by upper(p.surname), upper(coalesce(p.first_names, '')), p.dependant_code nulls first
      limit ${opts.limit ?? 50}`
   return rows.map(toPatient)
@@ -245,9 +252,13 @@ async function shapePatient(tx: Tx, input: PatientInput, id?: string) {
     if (!ma) throw new DomainError('unknown medical aid', 'not_found', 404)
     if (!memberNo) throw new DomainError('a medical aid member needs a member number')
     dependantCode = dependantCode ?? '00'
-  } else {
-    memberNo = null
+  } else if (!memberNo) {
     dependantCode = null
+  }
+  // A private account keeps its account number (from Compharm) in member_no, so search by number finds the family.
+  if (dependantCode) {
+    if (!/^\d{1,2}$/.test(dependantCode)) throw new DomainError('the dependant code is a number: 00 for the main member, 01 for the first dependant')
+    dependantCode = dependantCode.padStart(2, '0')
   }
   if (input.doctorId) {
     const [d] = await tx`select id from doctors where id = ${input.doctorId}`
