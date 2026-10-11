@@ -35,12 +35,17 @@ const binsScript = `
   const f = document.getElementById('bins-filter')
   f.querySelectorAll('select').forEach((s) => s.addEventListener('change', () => f.submit()))
   const all = () => document.querySelectorAll('details.bin-group')
-  document.getElementById('bins-open').onclick = () => all().forEach((d) => { d.open = true })
   document.getElementById('bins-close').onclick = () => all().forEach((d) => { d.open = false })
   document.getElementById('bins-print').onclick = () => window.print()
+  // one bin open at a time: opening a bin closes the others (printing opens them all for the count sheet)
+  let printing = false
+  all().forEach((d) => d.addEventListener('toggle', () => {
+    if (printing || !d.open) return
+    all().forEach((o) => { if (o !== d && o.open) o.open = false })
+  }))
   let was = []
-  addEventListener('beforeprint', () => { was = [...all()].map((d) => d.open); all().forEach((d) => { d.open = true }) })
-  addEventListener('afterprint', () => all().forEach((d, i) => { d.open = was[i] ?? d.open }))
+  addEventListener('beforeprint', () => { printing = true; was = [...all()].map((d) => d.open); all().forEach((d) => { d.open = true }) })
+  addEventListener('afterprint', () => { all().forEach((d, i) => { d.open = was[i] ?? d.open }); setTimeout(() => { printing = false }, 500) })
   const mf = document.getElementById('move-form'); if (!mf) return
   const count = () => {
     const n = document.querySelectorAll('input[name=move]:checked').length
@@ -160,8 +165,7 @@ export function itemRoutes() {
       <>
         <div class="row"><h1>Items by bin</h1><span class="spacer" />
           <a class="btn secondary noprint" href="/items">Search items</a>
-          <button type="button" class="secondary noprint" id="bins-open">Open all</button>
-          <button type="button" class="secondary noprint" id="bins-close">Close all</button>
+          <button type="button" class="secondary noprint" id="bins-close">Close bin</button>
           <button type="button" class="noprint" id="bins-print">🖨 Print list</button></div>
         <form class="row panel noprint" id="bins-filter">
           <label class="f">Bin<select name="bin">
