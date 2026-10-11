@@ -284,11 +284,13 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
         {props.user && (
           <header>
             <a class="brand" href="/">sylken</a>
-            <nav class="main-tabs">
-              {visible.map((g) => (
-                <a href={menuPath(g.slug)} class={g === active ? 'on' : ''} style={`--hue:${g.hue}`}>{g.icon} {g.label}</a>
-              ))}
-            </nav>
+            {props.path !== '/' && (
+              <nav class="main-tabs">
+                {visible.map((g) => (
+                  <a href={menuPath(g.slug)} class={g === active ? 'on' : ''} style={`--hue:${g.hue}`}>{g.icon} {g.label}</a>
+                ))}
+              </nav>
+            )}
             <button type="button" id="touch-toggle" class="secondary" style="padding:4px 10px;font-size:13px" title="Bigger buttons for a touch screen">Touch screen</button>
             <span class="who" title={`${props.user.tenantName} · ${props.user.roles.map((r) => roleLabels[r]).join(', ')}`}><a href="/me">{props.user.name}</a> · <a href="/logout">Log out</a></span>
           </header>
