@@ -25,6 +25,10 @@ export interface Settings {
   cashRounding: number
   tillButtons: TillButton[]
   rxButtons: TillButton[]
+  maxChange: number
+  cashDropThreshold: number
+  cashierDiscountPct: number
+  cardTerminal: 'standalone' | 'integrated'
 }
 
 /** A quick-sale button on the till's touch layout. */
@@ -57,6 +61,10 @@ export async function getSettings(tx: Tx): Promise<Settings> {
     cashRounding: num(s.cash_rounding),
     tillButtons: (s.till_buttons ?? []) as TillButton[],
     rxButtons: (s.rx_buttons ?? []) as TillButton[],
+    maxChange: num(s.max_change),
+    cashDropThreshold: num(s.cash_drop_threshold),
+    cashierDiscountPct: num(s.cashier_discount_pct),
+    cardTerminal: s.card_terminal,
   }
 }
 
@@ -83,6 +91,10 @@ const columns: Record<keyof Settings, string> = {
   cashRounding: 'cash_rounding',
   tillButtons: 'till_buttons',
   rxButtons: 'rx_buttons',
+  maxChange: 'max_change',
+  cashDropThreshold: 'cash_drop_threshold',
+  cashierDiscountPct: 'cashier_discount_pct',
+  cardTerminal: 'card_terminal',
 }
 
 export async function updateSettings(tx: Tx, patch: Partial<Settings>, userId?: string) {

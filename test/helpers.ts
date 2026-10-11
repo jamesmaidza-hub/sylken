@@ -67,3 +67,15 @@ export async function addUser(db: Sql, tenantId: string, roles: Role[], name = r
   })
   return { id, email, password, staffCode }
 }
+
+/**
+ * A supervisor's approval written straight into the database, for tests of what the server does with
+ * one. (How a supervisor gives one, with their code and second PIN, is tested in till-rules.test.ts.)
+ */
+export async function approvalFor(tx: Tx, tillId: string, subjectId: string, action: string, detail: Record<string, unknown> = {}) {
+  const [boss] = await tx`select id from users where 'manager' = any(roles) limit 1`
+  const [a] = await tx`
+    insert into till_approvals (tenant_id, till_id, subject_id, action, detail, approved_by)
+    values (current_setting('app.tenant_id')::uuid, ${tillId}, ${subjectId}, ${action}, ${tx.json(detail as any)}, ${boss.id}) returning id`
+  return a.id as string
+}

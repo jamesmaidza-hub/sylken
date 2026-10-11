@@ -168,7 +168,7 @@ describe('web', () => {
     const saleId = crypto.randomUUID()
     const now = new Date().toISOString()
     const body = JSON.stringify({ tillId, pending: 3, runIds: [runId], ops: [
-      { type: 'open_run', userId: cat.user.id, data: { id: runId, tillId, openingFloat: 100, openedAt: now } },
+      { type: 'open_run', userId: cat.user.id, data: { id: runId, tillId, openingFloat: 100, openedAt: now, cashierCode: t.staffCode } },
       { type: 'sale', userId: cat.user.id, data: { id: saleId, runId, kind: 'sale', occurredAt: now, cashTendered: 50, cashierCode: t.staffCode,
         lines: [{ itemId: item.id, qtyUnits: 24, listTotal: 17.1, lineTotal: 17.1 }], payments: [{ tender: 'cash', amount: 17.1 }] } },
       { type: 'sale', data: { id: 'not-a-uuid' } },
@@ -184,9 +184,15 @@ describe('web', () => {
     const slip = await (await get(`/sales/${saleId}/slip`)).text()
     expect(slip).toContain('TAX INVOICE · COPY')
     expect(slip).toContain('PANADO 24')
-    expect(await (await get(`/cashup/runs/${runId}`)).text()).toContain('Cash up this run')
-    const closed = await post(`/cashup/runs/${runId}/close`, { cash: '117.10', card: '0', cheque: '0', floatKept: '100', note: '' })
+    const counting = await (await get(`/cashup/runs/${runId}`)).text()
+    expect(counting).toContain('Cash up this run')
+    expect(counting).not.toContain('117.10')                         // counted blind: the expected cash is not on the form
+    // P117.10 counted as notes and coins: 1 x P100, 1 x P10, 1 x P5, 1 x P2, 1 x 10t
+    const closed = await post(`/cashup/runs/${runId}/close`, { d_100: '1', d_10: '1', d_5: '1', d_2: '1', 'd_0.1': '1', card: '0', cheque: '0', floatKept: '100', note: '' })
     expect(new URL(closed.headers.get('location')!, 'http://x').searchParams.get('ok')).toMatch(/balances/)
+    const z = await (await get(`/cashup/runs/${runId}/z`)).text()
+    expect(z).toContain('Z report')
+    expect(z).toContain('Variance')
     const after = await send()
     expect(after.runs[runId].status).toBe('closed')
     expect(await (await get('/cashup/problems')).text()).toContain('not-a-uuid')

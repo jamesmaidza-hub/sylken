@@ -6,11 +6,11 @@ import { createItem, getItem } from '../src/domain/items.js'
 import { dailySales, itemGp, salesSummary, shopToday } from '../src/domain/sales.js'
 import { postMovements } from '../src/domain/stock.js'
 import {
-  applyTillOps, closeRun, getSale, linePrice, listTills, roundCash, openRun, recordSale, recordTillEntry, runSummary, vatIn,
+  applyTillOps, closeRun, createTill, getSale, linePrice, listTills, roundCash, openRun, recordSale, recordTillEntry, runSummary, vatIn,
   type SaleInput,
 } from '../src/domain/till.js'
 import { purgeTenant } from '../src/domain/tenants.js'
-import { adminDb, appDb, newTenant } from './helpers.js'
+import { adminDb, appDb, approvalFor, newTenant } from './helpers.js'
 
 let db: Sql
 let admin: Sql
@@ -32,11 +32,20 @@ const item = (code: string, extra: Record<string, unknown> = {}) =>
     return i
   })
 
+// A till can only have one run open, so each test run gets a till of its own.
+const tillOf = new Map<string, string>()
 const newRun = async (float = 200) => {
   const id = randomUUID()
-  await t.as((tx) => openRun(tx, { id, tillId, openingFloat: float, openedAt: new Date() }))
+  await t.as(async (tx) => {
+    const till = await createTill(tx, { code: `T${randomUUID().slice(0, 6)}`, name: 'Test till' })
+    tillOf.set(id, till)
+    await openRun(tx, { id, tillId: till, openingFloat: float, openedAt: new Date() }, t.userId)
+  })
   return id
 }
+/** A supervisor's approval for something on a run's till. */
+const approve = (run: string, subject: string, action: string, detail: Record<string, unknown> = {}) =>
+  t.as((tx) => approvalFor(tx, tillOf.get(run)!, subject, action, detail))
 
 const sale = (runId: string, lines: SaleInput['lines'], payments: SaleInput['payments'], extra: Partial<SaleInput> = {}): SaleInput => ({
   id: randomUUID(), runId, kind: 'sale', occurredAt: new Date(), lines, payments, cashierCode: 'ZZ', ...extra,
@@ -90,7 +99,7 @@ describe('sales', () => {
   it('records an offline sale even when the item went quarantined or the stock ran out', async () => {
     const i = await item('S-3', { status: 'quarantined' })
     const run = await newRun()
-    await t.as((tx) => recordSale(tx, sale(run, [{ itemId: i.id, qtyUnits: 150, listTotal: 513, lineTotal: 513 }], [{ tender: 'card', amount: 513 }])))
+    await t.as((tx) => recordSale(tx, sale(run, [{ itemId: i.id, qtyUnits: 150, listTotal: 513, lineTotal: 513 }], [{ tender: 'card', amount: 513, reference: 'A1B2C3' }])))
     expect((await t.as((tx) => getItem(tx, i.id)))!.onHandUnits).toBe(-50)
   })
 
@@ -121,8 +130,9 @@ describe('sales', () => {
     const run = await newRun()
     const s = sale(run, [{ itemId: i.id, qtyUnits: 10, listTotal: 34.2, lineTotal: 34.2 }], [{ tender: 'cash', amount: 34.2 }])
     await t.as((tx) => recordSale(tx, s))
-    await t.as((tx) => recordSale(tx, sale(run, [{ itemId: i.id, qtyUnits: -10, listTotal: -34.2, lineTotal: -34.2 }],
-      [{ tender: 'cash', amount: -34.2 }], { kind: 'refund', refundOf: s.id })))
+    const refund = sale(run, [{ itemId: i.id, qtyUnits: -10, listTotal: -34.2, lineTotal: -34.2 }], [{ tender: 'cash', amount: -34.2 }], { kind: 'refund', refundOf: s.id })
+    refund.refundApprovalId = await approve(run, refund.id, 'refund', { total: 34.2 })
+    await t.as((tx) => recordSale(tx, refund))
     expect((await t.as((tx) => getItem(tx, i.id)))!.onHandUnits).toBe(100)
     const sum = (await t.as((tx) => runSummary(tx, run)))!
     expect(sum.byTender.cash).toBe(0)
@@ -158,18 +168,23 @@ describe('a full trading day', () => {
     const acc = await t.as((tx) => createAccount(tx, { accountNo: 'DAY', name: 'Clinic account' }))
     const runA = await newRun(200)
     const runB = randomUUID()
+    const milk = randomUUID()
+    tillOf.set(runB, tillId)
+    const milkOk = await approve(runB, milk, 'petty_cash', { amount: 25 })
     const ops = [
       { type: 'open_run' as const, data: { id: runB, tillId, openingFloat: 150, openedAt: new Date() } },
       // Run B: rung up offline and synced later.
       { type: 'sale' as const, data: sale(runB, [{ itemId: panado.id, qtyUnits: 20, listTotal: 34.2, lineTotal: 34.2 }], [{ tender: 'cash', amount: 34.2 }], { cashTendered: 50 }) },
-      { type: 'sale' as const, data: sale(runB, [{ itemId: vitc.id, qtyUnits: 2, listTotal: 150, lineTotal: 140 }], [{ tender: 'card', amount: 140, reference: '0042' }]) },
-      { type: 'till_entry' as const, data: { id: randomUUID(), runId: runB, kind: 'petty_cash' as const, tender: 'cash' as const, amount: 25, note: 'Milk', occurredAt: new Date() } },
+      { type: 'sale' as const, data: sale(runB, [{ itemId: vitc.id, qtyUnits: 2, listTotal: 150, lineTotal: 140, adjust: 'discount' as const }], [{ tender: 'card', amount: 140, reference: '0042' }]) },
+      { type: 'till_entry' as const, data: { id: milk, runId: runB, kind: 'petty_cash' as const, tender: 'cash' as const, amount: 25, note: 'Milk', approvalId: milkOk, occurredAt: new Date() } },
     ]
     const results = await t.as((tx) => applyTillOps(tx, tillId, ops, t.userId))
     expect(results.map((r) => r.status)).toEqual(['recorded', 'recorded', 'recorded', 'recorded'])
     expect((await t.as((tx) => applyTillOps(tx, tillId, ops, t.userId))).map((r) => r.status)).toEqual(['duplicate', 'duplicate', 'duplicate', 'duplicate'])
 
     // Run A: a mix of tenders.
+    const stamps = randomUUID()
+    const stampsOk = await approve(runA, stamps, 'petty_cash', { amount: 10 })
     await t.as(async (tx) => {
       await recordSale(tx, sale(runA, [{ itemId: panado.id, qtyUnits: 10, listTotal: 17.1, lineTotal: 17.1 }], [{ tender: 'cash', amount: 17.1 }]))
       await recordSale(tx, sale(runA, [{ itemId: vitc.id, qtyUnits: 1, listTotal: 75, lineTotal: 75 }], [{ tender: 'eft', amount: 75, reference: 'FNB 991' }]))
@@ -177,7 +192,7 @@ describe('a full trading day', () => {
         [{ tender: 'medical_aid', amount: 41.3 }, { tender: 'cash', amount: 10 }], { medicalAid: 'BOMAid', memberNo: '123' }))
       await recordSale(tx, sale(runA, [{ itemId: vitc.id, qtyUnits: 2, listTotal: 150, lineTotal: 150 }], [{ tender: 'account', amount: 150 }], { accountId: acc }))
       await recordTillEntry(tx, { id: randomUUID(), runId: runA, kind: 'account_payment', tender: 'card', amount: 60, accountId: acc, occurredAt: new Date() })
-      await recordTillEntry(tx, { id: randomUUID(), runId: runA, kind: 'petty_cash', tender: 'cash', amount: 10, note: 'Stamps', occurredAt: new Date() })
+      await recordTillEntry(tx, { id: stamps, runId: runA, kind: 'petty_cash', tender: 'cash', amount: 10, note: 'Stamps', approvalId: stampsOk, occurredAt: new Date() })
     })
 
     const a = (await t.as((tx) => runSummary(tx, runA)))!
@@ -202,7 +217,7 @@ describe('a full trading day', () => {
     expect(sum.warnings.some((w) => w.includes(`Run ${rowA.run.runNo}`) && w.includes('after cash-up'))).toBe(true)
 
     // Only this test's runs, so the blocks can be checked to the thebe.
-    const only = await t.as((tx) => salesSummary(tx, { from: today, to: today, tillId }))
+    const only = await t.as((tx) => salesSummary(tx, { from: today, to: today }))
     const day = only.rows.filter((r) => r.run.id === runA || r.run.id === runB)
     expect(day.reduce((s, r) => s + r.run.sales.total, 0)).toBeCloseTo(34.2 + 140 + 17.1 + 75 + 51.3 + 150 + 17.1, 2)
 
@@ -225,15 +240,17 @@ describe('a full trading day', () => {
     const acc = await t2.as((tx) => createAccount(tx, { accountNo: 'A', name: 'A' }))
     const run = randomUUID()
     const line = (n: number) => [{ itemId: i.id, qtyUnits: n, listTotal: 20 * n, lineTotal: 20 * n }]
+    const bread = randomUUID()
+    const breadOk = await t2.as((tx) => approvalFor(tx, till2, bread, 'petty_cash', { amount: 5 }))
     await t2.as(async (tx) => {
-      await openRun(tx, { id: run, tillId: till2, openingFloat: 100, openedAt: new Date() })
+      await openRun(tx, { id: run, tillId: till2, openingFloat: 100, openedAt: new Date() }, t2.userId)
       await recordSale(tx, { ...sale(run, line(1), [{ tender: 'cash', amount: 20 }]) })
-      await recordSale(tx, { ...sale(run, line(2), [{ tender: 'card', amount: 40 }]) })
+      await recordSale(tx, { ...sale(run, line(2), [{ tender: 'card', amount: 40, reference: '771204' }]) })
       await recordSale(tx, { ...sale(run, line(3), [{ tender: 'eft', amount: 60 }]) })
       await recordSale(tx, { ...sale(run, line(4), [{ tender: 'medical_aid', amount: 80 }], { medicalAid: 'BOMAid' }) })
       await recordSale(tx, { ...sale(run, line(5), [{ tender: 'account', amount: 100 }], { accountId: acc }) })
       await recordTillEntry(tx, { id: randomUUID(), runId: run, kind: 'account_payment', tender: 'cash', amount: 30, accountId: acc, occurredAt: new Date() })
-      await recordTillEntry(tx, { id: randomUUID(), runId: run, kind: 'petty_cash', tender: 'cash', amount: 5, note: 'Bread', occurredAt: new Date() })
+      await recordTillEntry(tx, { id: bread, runId: run, kind: 'petty_cash', tender: 'cash', amount: 5, note: 'Bread', approvalId: breadOk, occurredAt: new Date() })
       await closeRun(tx, run, { counted: { cash: 145, card: 40, cheque: 0 }, floatKept: 100 })
     })
     const today = shopToday('Africa/Gaborone')

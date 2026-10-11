@@ -4,7 +4,7 @@ import type { Sql, Tx } from '../db/index.js'
 import { withTenant } from '../db/index.js'
 import { security } from '../security/config.js'
 import { tokenHash } from '../security/crypto.js'
-import { isRole, needsSecondFactor, type Role } from '../security/roles.js'
+import { can, isRole, needsSecondFactor, type Permission, type Role } from '../security/roles.js'
 import { DomainError } from './errors.js'
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>
@@ -93,18 +93,51 @@ async function createSession(db: Sql, userId: string, tenantId: string, pending:
 
 /** Count a wrong password or code; lock the account when there have been too many in a row. */
 async function recordFailure(db: Sql, tenantId: string, userId: string, action: string, meta: ClientMeta) {
-  await withTenant(db, tenantId, async (tx) => {
-    const [r] = await tx`
-      update users set failed_logins = failed_logins + 1,
-             locked_until = case when failed_logins + 1 >= ${security.maxFailures}
-                                 then now() + ${security.lockMinutes + ' minutes'}::interval else locked_until end
-       where id = ${userId} returning failed_logins, locked_until`
-    await auditAuth(tx, userId, action, meta)
-    if (r && r.failed_logins >= security.maxFailures) {
-      await tx`update users set failed_logins = 0 where id = ${userId}`
-      await auditAuth(tx, userId, 'locked', meta, { minutes: security.lockMinutes })
-    }
-  })
+  await withTenant(db, tenantId, (tx) => countFailure(tx, userId, action, meta))
+}
+
+async function countFailure(tx: Tx, userId: string, action: string, meta: ClientMeta) {
+  const [r] = await tx`
+    update users set failed_logins = failed_logins + 1,
+           locked_until = case when failed_logins + 1 >= ${security.maxFailures}
+                               then now() + ${security.lockMinutes + ' minutes'}::interval else locked_until end
+     where id = ${userId} returning failed_logins, locked_until`
+  await auditAuth(tx, userId, action, meta)
+  if (r && r.failed_logins >= security.maxFailures) {
+    await tx`update users set failed_logins = 0 where id = ${userId}`
+    await auditAuth(tx, userId, 'locked', meta, { minutes: security.lockMinutes })
+  }
+}
+
+/**
+ * A supervisor allowing something at the till: their 2-letter staff code and second PIN. The person
+ * must be active, not locked, and hold the permission. A wrong PIN counts towards the same lockout
+ * as a wrong login, so the PIN can't be guessed at the till either. Returns null on any failure,
+ * without saying which part was wrong.
+ */
+export async function checkStaffPin(tx: Tx, code: unknown, pin: unknown, perm: Permission, meta: ClientMeta = {}): Promise<{ id: string; name: string; code: string } | null> {
+  const c = String(code ?? '').trim().toUpperCase()
+  const p = String(pin ?? '').trim()
+  const [u] = /^[A-Z]{2}$/.test(c) ? await tx`select id, name, roles, active, second_pin_hash, locked_until from users where staff_code = ${c}` : []
+  if (!u || !u.second_pin_hash) {
+    await verifyPassword(p, await dummyHash)
+    return null
+  }
+  if (u.locked_until && new Date(u.locked_until) > new Date()) {
+    await auditAuth(tx, u.id, 'till_pin_refused_locked', meta)
+    return null
+  }
+  const good = await verifyPassword(p, u.second_pin_hash)
+  if (!good) {
+    await countFailure(tx, u.id, 'till_pin_failed', meta)
+    return null
+  }
+  if (!u.active || !can((u.roles as string[]).filter(isRole), perm)) {
+    await auditAuth(tx, u.id, 'till_pin_refused_role', meta)
+    return null
+  }
+  await tx`update users set failed_logins = 0 where id = ${u.id}`
+  return { id: u.id as string, name: u.name as string, code: c }
 }
 
 async function logAuth(db: Sql, tenantId: string, userId: string, action: string, meta: ClientMeta) {

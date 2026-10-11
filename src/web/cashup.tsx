@@ -2,7 +2,8 @@ import { Hono } from 'hono'
 import { DomainError } from '../domain/errors.js'
 import { listSales, salesSummary, shopToday } from '../domain/sales.js'
 import { getSettings } from '../domain/settings.js'
-import { closeRun, countedTenders, createTill, listTills, runSummary, tenderLabels, type Tender } from '../domain/till.js'
+import { denominations } from '../domain/basket.js'
+import { closeRun, createTill, getZReport, listTills, runSummary, tenderLabels, type Tender } from '../domain/till.js'
 import { back, can, page, run, type Ctx, type Env } from './app.js'
 import { dateTime, money } from './layout.js'
 
@@ -148,7 +149,7 @@ export function cashupRoutes() {
 
   r.get('/runs/:id', async (c) => {
     const blind = !can(c, 'cashup.manage')
-    const { s, sales, entries, defaultFloat } = await run(c, async (tx) => {
+    const { s, sales, entries, events, defaultFloat } = await run(c, async (tx) => {
       const s = await runSummary(tx, c.req.param('id'))
       if (!s) throw new DomainError('unknown till run', 'not_found', 404)
       return {
@@ -157,6 +158,9 @@ export function cashupRoutes() {
         entries: await tx`
           select e.*, a.name as account_name, u.name as user_name from till_entries e
             left join customer_accounts a on a.id = e.account_id left join users u on u.id = e.user_id
+           where e.till_run_id = ${s.id} order by e.occurred_at`,
+        events: await tx`
+          select e.*, u.name as approver from till_events e left join till_approvals a on a.id = e.approval_id left join users u on u.id = a.approved_by
            where e.till_run_id = ${s.id} order by e.occurred_at`,
         defaultFloat: (await getSettings(tx)).defaultFloat,
       }
@@ -167,13 +171,17 @@ export function cashupRoutes() {
     return page(c, `Run ${s.runNo}`, (
       <>
         <h1>Run {s.runNo} · {s.tillName} ({s.tillCode}) <span class="muted">{s.status === 'open' ? 'open' : 'cashed up'}</span></h1>
-        <p class="muted">Opened {dateTime(s.openedAt)}{s.openedBy && ` by ${s.openedBy}`} with a float of {money(s.openingFloat)}.
+        <p class="muted">Opened {dateTime(s.openedAt)}{s.openedBy && ` by ${s.openedBy}`}{s.cashier && `, drawer cashier ${s.cashier}`}, with a float of {money(s.openingFloat)} counted.
+          {!hide && s.expectedFloat !== null && s.expectedFloat !== s.openingFloat && ` The last run left ${money(s.expectedFloat)} (${money(s.openingFloat - s.expectedFloat)} difference).`}
           {s.closedAt && ` Cashed up ${dateTime(s.closedAt)}${s.closedBy ? ` by ${s.closedBy}` : ''}; ${money(s.floatKept)} left in the drawer.`}</p>
+        {s.zReport && <p><a class="btn secondary" href={`/cashup/runs/${s.id}/z`}>Z report {s.zReport.zNo}</a></p>}
         {s.late.count > 0 && <div class="msg err">{s.late.count} sale(s) or entries reached the server after this run was cashed up ({money(s.late.total)} in sales). They are included below, so the surplus now shows them.</div>}
         <div class="stats">
           <div class="stat"><b>{s.sales.count}</b><span>sales{s.sales.refunds ? `, ${s.sales.refunds} refunds` : ''}</span></div>
           {!hide && <div class="stat"><b>{money(s.sales.total)}</b><span>takings incl VAT ({money(s.sales.vat)} VAT){s.sales.rounding !== 0 && `, cash rounding ${money(s.sales.rounding)}`}</span></div>}
           <div class="stat"><b>{money(s.pettyCash)}</b><span>petty cash paid out</span></div>
+          {s.cashDrops > 0 && <div class="stat"><b>{money(s.cashDrops)}</b><span>cash drops to the safe</span></div>}
+          {(s.events.noSales > 0 || s.events.voids > 0) && <div class="stat"><b>{s.events.noSales} / {s.events.voids}</b><span>no-sales / voids</span></div>}
           {s.surplus !== null && <div class="stat"><b class={s.surplus < 0 ? 'neg' : s.surplus > 0 ? 'pos' : ''}>{money(s.surplus)}</b><span>{s.surplus < 0 ? 'short' : s.surplus > 0 ? 'over' : 'balanced'}</span></div>}
         </div>
         {!hide && (
@@ -194,40 +202,60 @@ export function cashupRoutes() {
           <>
             <h2>Cash-up</h2>
             <div class="wrap"><table>
-              <thead><tr><th>Tender</th><th class="n">Expected</th><th class="n">Counted</th><th class="n">Surplus</th></tr></thead>
+              <thead><tr><th>Tender</th><th class="n">Expected</th><th class="n">Counted</th><th class="n">Variance</th></tr></thead>
               <tbody>{s.counts.map((x) => <tr><td>{tenderLabels[x.tender]}</td><td class="n">{money(x.expected)}</td><td class="n">{money(x.counted)}</td><td class="n">{signed(x.surplus)}</td></tr>)}
                 <tr><td>{tenderLabels.eft}</td><td class="n">{money(s.expected.eft)}</td><td class="n muted" colspan={2}>check against the bank statement</td></tr>
               </tbody>
             </table></div>
+            <p class="hint">Cash variance = cash counted − (opening float {money(s.openingFloat)} + net cash {money(s.netCash)} − cash drops {money(s.cashDrops)}).</p>
+            {s.cashCount.length > 0 && <p class="muted">Counted: {s.cashCount.map((d) => `${d.qty} × ${money(d.denomination)}`).join(', ')}.</p>}
             {s.note && <p>Note: {s.note}</p>}
           </>
         ) : (
           <>
             <h2>Cash up this run</h2>
-            <form method="post" action={`/cashup/runs/${s.id}/close`} class="grid panel">
-              {countedTenders.map((t) => (
-                <label>{tenderLabels[t]} counted (P){!blind && <span class="hint">system: {money(s.expected[t])}</span>}
-                  <input name={t} type="number" step="0.01" min="0" required autofocus={t === 'cash'} /></label>
-              ))}
-              <label>Float left in the drawer (P)<input name="floatKept" type="number" step="0.01" min="0" value={(defaultFloat || s.openingFloat).toFixed(2)} required /></label>
-              <label style="grid-column:1/-1">Note<input name="note" placeholder="Anything the owner should know" /></label>
-              <div style="grid-column:1/-1" class="row">
-                <span class="hint">Count the whole drawer including the float, add up the card machine's batch total and any cheques.
-                  {blind ? ' The expected amounts are shown after cash-up.' : ` EFT of ${money(s.expected.eft)} is checked on the bank statement instead.`}</span>
+            <form method="post" action={`/cashup/runs/${s.id}/close`} class="panel">
+              <p class="hint">Count blind: type how many of each note and coin are in the drawer, including the float. What the system expects is shown once you have cashed up.</p>
+              <div class="cgrid">
+                {denominations.map((d, i) => (
+                  <label>{money(d)} {d >= 10 ? 'notes' : 'coins'}<input name={`d_${d}`} type="number" step="1" min="0" inputmode="numeric" placeholder="0" autofocus={i === 0} /></label>
+                ))}
+              </div>
+              <div class="cgrid" style="margin-top:8px">
+                <label>{tenderLabels.card} batch total (P)<input name="card" type="number" step="0.01" min="0" required /></label>
+                <label>{tenderLabels.cheque} total (P)<input name="cheque" type="number" step="0.01" min="0" required /></label>
+                <label>Float left in the drawer (P)<input name="floatKept" type="number" step="0.01" min="0" value={(defaultFloat || s.openingFloat).toFixed(2)} required /></label>
+                <label style="grid-column:1/-1">Note<input name="note" placeholder="Anything the owner should know" /></label>
+              </div>
+              <div class="row" style="margin-top:8px">
+                <span class="hint">Add up the card machine's batch total and any cheques. EFT is checked on the bank statement instead.</span>
                 <span class="spacer" /><button>Cash up and close the run</button>
               </div>
             </form>
-            <p class="hint">Make sure the till shows nothing waiting to send before cashing up, or late sales will show as a shortage on this run.</p>
+            <p class="hint">Make sure the till shows nothing waiting to send before cashing up, or late sales will show as a shortage on this run. Once cashed up, the run and its Z report are locked.</p>
+          </>
+        )}
+        {!hide && events.length > 0 && (
+          <>
+            <h2>No-sales, voids and price warnings</h2>
+            <div class="wrap"><table>
+              <thead><tr><th>Time</th><th>What</th><th>Cashier</th><th>Allowed by</th><th class="n">Amount</th></tr></thead>
+              <tbody>{events.map((e: any) => (
+                <tr><td>{dateTime(e.occurred_at)}</td>
+                  <td>{e.priority === 'high' && <span class="neg">! </span>}{e.kind === 'no_sale' ? `No sale: ${e.reason}` : e.kind === 'void' ? `Void: ${e.detail?.description ?? ''}${e.detail?.units ? ` × ${e.detail.units}` : ''}` : `List price not the item's price (line ${e.detail?.lineNo})`}</td>
+                  <td>{e.cashier_code}</td><td>{e.approver ?? ''}</td><td class="n">{e.detail?.lineTotal !== undefined ? money(Number(e.detail.lineTotal)) : e.detail?.listTotal !== undefined ? money(Number(e.detail.listTotal)) : ''}</td></tr>
+              ))}</tbody>
+            </table></div>
           </>
         )}
         {entries.length > 0 && (
           <>
-            <h2>Petty cash and account payments</h2>
+            <h2>Petty cash, cash drops and account payments</h2>
             <div class="wrap"><table>
               <thead><tr><th>Time</th><th>What</th><th>Tender</th><th class="n">Amount</th><th>By</th></tr></thead>
               <tbody>{entries.map((e: any) => (
                 <tr><td>{dateTime(e.occurred_at)}</td>
-                  <td>{e.kind === 'petty_cash' ? `Petty cash: ${e.note}` : <>Payment from <a href={`/accounts/${e.account_id}`}>{e.account_name}</a></>}{e.late && <span class="neg"> (late)</span>}</td>
+                  <td>{e.kind === 'petty_cash' ? `Petty cash: ${e.note}` : e.kind === 'cash_drop' ? `Cash drop, ${e.note}` : <>Payment from <a href={`/accounts/${e.account_id}`}>{e.account_name}</a></>}{e.late && <span class="neg"> (late)</span>}</td>
                   <td>{tenderLabels[e.tender as Tender]}</td><td class="n">{money(Number(e.amount))}</td><td>{e.user_name}</td></tr>
               ))}</tbody>
             </table></div>
@@ -241,11 +269,48 @@ export function cashupRoutes() {
   r.post('/runs/:id/close', async (c) => {
     const b = await c.req.parseBody()
     const n = (k: string) => (String(b[k] ?? '').trim() === '' ? NaN : Number(b[k]))
+    // Notes and coins: an empty box means none of that one.
+    const cash = Object.fromEntries(denominations.map((d) => [String(d), String(b[`d_${d}`] ?? '').trim() === '' ? 0 : Number(b[`d_${d}`])]))
     const s = await run(c, (tx) => closeRun(tx, c.req.param('id'), {
-      counted: { cash: n('cash'), card: n('card'), cheque: n('cheque') }, floatKept: n('floatKept'), note: String(b.note ?? ''),
+      cash, counted: { card: n('card'), cheque: n('cheque') }, floatKept: n('floatKept'), note: String(b.note ?? ''),
     }, c.get('user').userId))
     const msg = s.surplus === 0 ? 'Cashed up: the run balances.' : `Cashed up: ${money(Math.abs(s.surplus!))} ${s.surplus! < 0 ? 'short' : 'over'}.`
     return back(c, `/cashup/runs/${s.id}`, { ok: msg })
+  })
+
+  /** The Z report of a cashed-up run: a fixed summary, numbered, that never changes. */
+  r.get('/runs/:id/z', async (c) => {
+    const z = await run(c, (tx) => getZReport(tx, c.req.param('id')))
+    if (!z) throw new DomainError('this run has no Z report yet; it is made when the run is cashed up', 'not_found', 404)
+    const p = z.payload
+    const row = (label: string, v: any) => <tr><td>{label}</td><td class="n">{v}</td></tr>
+    return page(c, `Z report ${z.zNo}`, (
+      <>
+        <div class="row"><h1>Z report {z.zNo}</h1><span class="spacer" /><button class="secondary" onclick="window.print()">Print</button></div>
+        <p class="muted">{p.till.name} ({p.till.code}) · run {p.shift.runNo} · {dateTime(new Date(p.shift.openedAt))} to {dateTime(new Date(p.shift.closedAt))}{p.cashier && ` · cashier ${p.cashier}`}{p.closedBy && ` · cashed up by ${p.closedBy}`}</p>
+        <div class="blocks">
+          <div class="block"><h3>Sales</h3><table class="sumtab">
+            {row('Sales', p.sales.count)}{row('Refunds', `${p.sales.refunds} · ${money(p.sales.refundTotal)}`)}
+            {row('Net takings incl VAT', money(p.sales.net))}{row('VAT', money(p.sales.vat))}{row('Cash rounding', money(p.sales.rounding))}
+            {row('Discounts', `${p.discounts.lines} line(s) · ${money(p.discounts.total)}`)}{row('Prices changed', `${p.priceOverrides.lines} line(s) · ${money(p.priceOverrides.total)}`)}
+            {row('Voids', `${p.voids.count} · ${money(p.voids.total)}`)}{row('No-sales', p.noSales)}
+          </table></div>
+          <div class="block"><h3>VAT by rate</h3><table class="sumtab">
+            {p.vatByRate.map((v: any) => row(`${(v.rate * 100).toFixed(0)}%: ${money(v.net)} + VAT`, money(v.vat)))}
+          </table></div>
+          <div class="block"><h3>Tenders</h3><table class="sumtab">
+            {(Object.keys(p.tenders) as Tender[]).filter((t) => p.tenders[t] !== 0).map((t) => row(tenderLabels[t], money(p.tenders[t])))}
+          </table></div>
+          <div class="block"><h3>Cash</h3><table class="sumtab">
+            {row('Opening float', money(p.cash.openingFloat))}{row('+ Net cash', money(p.cash.netCash))}{row('− Cash drops', money(p.cash.cashDrops))}
+            {row('= Expected', money(p.cash.expected))}{row('Counted', p.cash.counted === null ? '' : money(p.cash.counted))}
+            <tr class="t"><td><b>Variance</b></td><td class="n"><b>{p.cash.variance === null ? '' : signed(p.cash.variance)}</b></td></tr>
+            {row('Float left', money(p.cash.floatKept))}
+          </table></div>
+        </div>
+        <p class="hint">Sent to accounting: {z.exportStatus === 'sent' ? 'yes' : 'not yet. No accounting system or central server is linked to sylken yet, so this report waits in the outbox.'}</p>
+      </>
+    ))
   })
 
   r.get('/problems', async (c) => {

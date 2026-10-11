@@ -151,8 +151,8 @@ button:focus-visible,.btn:focus-visible,a:focus-visible{outline:3px solid var(--
 button:hover,.btn:hover{filter:brightness(1.08)}
 button,.btn{background:var(--accent);color:var(--accent-ink);border:0;border-radius:6px;padding:7px 14px;cursor:pointer;text-decoration:none;display:inline-block}
 button.secondary,.btn.secondary{background:var(--chip);color:var(--ink)}button.danger{background:var(--bad);color:#fff}
-form.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
-form.grid label,label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+form.grid,div.cgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
+form.grid label,div.cgrid label,label.f{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.spacer{flex:1}
 .chip{display:inline-block;background:var(--chip);border-radius:10px;padding:0 8px;font-size:12px;margin:1px 2px 1px 0}
 .st-active{color:var(--good)}.st-dormant{color:var(--muted)}.st-quarantined{color:var(--bad)}.st-discontinued{color:var(--muted)}

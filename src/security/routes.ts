@@ -116,9 +116,11 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['GET', '/till/', 'till.use'],
   ['GET', '/till/app.js', 'till.use'],
   ['GET', '/till/sw.js', 'till.use'],
+  ['GET', '/till/basket.js', 'till.use'],
   ['GET', '/cashup', 'cashup.own'],
   ['POST', '/cashup/tills', 'cashup.manage'],
   ['GET', '/cashup/runs/:id', 'cashup.own'],
+  ['GET', '/cashup/runs/:id/z', 'cashup.own'],
   ['POST', '/cashup/runs/:id/close', 'cashup.own'],
   ['GET', '/cashup/problems', 'cashup.manage'],
   ['POST', '/cashup/problems/:id/resolve', 'cashup.manage'],
@@ -177,6 +179,9 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['GET', '/api/till/catalogue', 'till.use'],
   ['GET', '/api/till/scripts/:no', 'till.use'],
   ['POST', '/api/till/sync', 'till.use'],
+  ['GET', '/api/till/open-run', 'till.use'],
+  ['GET', '/api/till/sales/:ref', 'till.use'],
+  ['POST', '/api/till/approve', 'till.use'],      // the supervisor's own till.approve is checked with their code and PIN
 ]
 
 const table = new Map(routePermissions.map(([method, path, rule]) => [`${method} ${path}`, rule]))

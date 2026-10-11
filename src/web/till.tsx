@@ -10,6 +10,8 @@ import type { Ctx, Env } from './app.js'
  */
 const asset = (name: string) => readFileSync(new URL(`./till/${name}`, import.meta.url), 'utf8')
 const appJs = asset('app.js')
+// The basket engine is shared with the server, which checks every sale with the same rules.
+const basketJs = readFileSync(new URL('../domain/basket.js', import.meta.url), 'utf8')
 const swJs = asset('sw.js')
 const css = asset('till.css')
 
@@ -23,6 +25,12 @@ export function tillRoutes() {
     c.header('content-type', 'text/javascript; charset=utf-8')
     c.header('cache-control', 'no-cache')
     return c.body(appJs)
+  })
+
+  r.get('/till/basket.js', (c) => {
+    c.header('content-type', 'text/javascript; charset=utf-8')
+    c.header('cache-control', 'no-cache')
+    return c.body(basketJs)
   })
 
   // Served from /till/ so it may control the till page; it keeps the page usable offline.
@@ -64,6 +72,7 @@ function tillPage(c: Ctx) {
             <button id="touch-toggle" type="button" class="secondary small" title="Switch between the keyboard layout and big buttons for a touch screen">Touch screen</button>
           </header>
           <div id="banner" class="banner" hidden></div>
+          <div id="drop-alert" class="banner bad" hidden>Too much cash in the drawer. Do a cash drop to a supervisor or the safe now (F3).</div>
           <main>
             <section class="left">
               <div class="scan">
@@ -96,6 +105,9 @@ function tillPage(c: Ctx) {
                   <button type="button" class="act bad" data-a="voidall">Void all</button>
                   <button type="button" class="act" data-a="script">Script</button><button type="button" class="act" data-a="refund">Refund</button>
                   <button type="button" class="act" data-a="reprint">Reprint</button>
+                  <button type="button" class="act" data-a="nosale">No sale</button>
+                  <button type="button" class="act" data-a="drop">Cash drop</button>
+                  <button type="button" class="act" data-a="petty">Petty cash</button>
                   <button type="button" class="pay" data-a="pay">Pay</button>
                 </div>
               </div>
@@ -109,6 +121,8 @@ function tillPage(c: Ctx) {
                 <dt>F8</dt><dd>Refund mode</dd>
                 <dt>F9</dt><dd>Petty cash</dd>
                 <dt>F10</dt><dd>Account payment</dd>
+                <dt>F7</dt><dd>No sale (open drawer)</dd>
+                <dt>F3</dt><dd>Cash drop</dd>
                 <dt>F12</dt><dd>Reprint last slip</dd>
                 <dt>Esc</dt><dd>Clear sale</dd>
               </dl>
@@ -119,7 +133,7 @@ function tillPage(c: Ctx) {
         <div id="modal" class="modal" hidden><form id="modal-form" class="box"></form></div>
         <div id="slip" class="slip"></div>
         <script>{raw(`window.SYLKEN=${boot.replace(/</g, '\\u003c')}`)}</script>
-        <script src="/till/app.js"></script>
+        <script type="module" src="/till/app.js"></script>
       </body>
     </html>,
   )

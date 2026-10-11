@@ -1,7 +1,7 @@
 // Keeps the till page and its script available when the shop's internet is down.
 // Network first, so a till always gets the newest version when it can; the cache is the fallback.
-const CACHE = 'sylken-till-v1'
-const SHELL = ['/till/', '/till/app.js']
+const CACHE = 'sylken-till-v2'
+const SHELL = ['/till/', '/till/app.js', '/till/basket.js']
 
 self.addEventListener('install', (e) => {
   e.waitUntil(caches.open(CACHE).then(async (c) => {

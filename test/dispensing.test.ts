@@ -12,7 +12,7 @@ import {
 import { updateSettings } from '../src/domain/settings.js'
 import { postMovements } from '../src/domain/stock.js'
 import { listTills, openRun, recordSale } from '../src/domain/till.js'
-import { appDb, newTenant } from './helpers.js'
+import { appDb, approvalFor, newTenant } from './helpers.js'
 
 let db: Sql
 let t: Awaited<ReturnType<typeof newTenant>>
@@ -239,7 +239,7 @@ describe('dispensing a script', () => {
 
     const tillId = (await t.as(listTills))[0].id
     const runId = randomUUID()
-    await t.as((tx) => openRun(tx, { id: runId, tillId, openingFloat: 0, openedAt: new Date() }))
+    await t.as((tx) => openRun(tx, { id: runId, tillId, openingFloat: 0, openedAt: new Date() }, t.userId))
     const saleId = randomUUID()
     const lines = look.lines.map((l) => ({ itemId: l.itemId, qtyUnits: l.qtyUnits, listTotal: l.lineTotal, lineTotal: l.lineTotal, scriptLineId: l.scriptLineId }))
     await t.as((tx) => recordSale(tx, {
@@ -255,8 +255,10 @@ describe('dispensing a script', () => {
       id: randomUUID(), runId, kind: 'sale', occurredAt: new Date(), scriptId: other, lines, payments: [{ tender: 'cash', amount: 125.4 }],
     }))).rejects.toThrow(/not dispensed/)
 
+    const refundId = randomUUID()
+    const refundOk = await t.as((tx) => approvalFor(tx, tillId, refundId, 'refund', { total: 125.4 }))
     await t.as((tx) => recordSale(tx, {
-      id: randomUUID(), runId, kind: 'refund', refundOf: saleId, occurredAt: new Date(), scriptId: sid,
+      id: refundId, runId, kind: 'refund', refundApprovalId: refundOk, occurredAt: new Date(), scriptId: sid,
       lines: lines.map((l) => ({ ...l, qtyUnits: -l.qtyUnits, listTotal: -l.listTotal, lineTotal: -l.lineTotal })),
       payments: [{ tender: 'cash', amount: -125.4 }],
     }))

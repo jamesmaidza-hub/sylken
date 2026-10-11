@@ -5,9 +5,11 @@ import { findByCode, searchItems } from '../domain/items.js'
 import { getSettings } from '../domain/settings.js'
 import { postMovements } from '../domain/stock.js'
 import { scriptForTill } from '../domain/scripts.js'
-import { applyTillOps, drawerTenders, tenders, touchTill } from '../domain/till.js'
+import {
+  applyTillOps, approvalActions, cashDropDue, drawerTenders, grantApproval, noSaleReasons, openRunOnTill, saleForRefund, tenders, touchTill,
+} from '../domain/till.js'
 import { staffWithCodes } from '../domain/users.js'
-import { run, type Env } from './app.js'
+import { clientIp, run, type Env } from './app.js'
 
 /**
  * JSON API: item lookup, raw stock movements, and the till's catalogue and sync. Everything a
@@ -27,21 +29,30 @@ const when = z.string().datetime({ offset: true }).transform((s) => new Date(s))
 const money = z.number().finite()
 const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('open_run'), userId: z.string().uuid().nullish(), data: z.object({
-    id: z.string().uuid(), tillId: z.string().uuid(), openingFloat: money, openedAt: when,
+    id: z.string().uuid(), tillId: z.string().uuid(), openingFloat: money, openedAt: when, cashierCode: z.string().max(4).nullish(),
   }) }),
   z.object({ type: z.literal('sale'), userId: z.string().uuid().nullish(), data: z.object({
-    id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['sale', 'refund']), refundOf: z.string().uuid().nullish(),
+    id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['sale', 'refund']), refundOf: z.string().uuid().nullish(), refundApprovalId: z.string().uuid().nullish(),
     occurredAt: when, accountId: z.string().uuid().nullish(), medicalAid: z.string().max(80).nullish(), memberNo: z.string().max(40).nullish(),
     cashTendered: money.nullish(), rounding: money.nullish(), scriptId: z.string().uuid().nullish(), cashierCode: z.string().max(4).nullish(),
     lines: z.array(z.object({ itemId: z.string().uuid(), qtyUnits: z.number().int(), listTotal: money, lineTotal: money,
-      scriptLineId: z.string().uuid().nullish() })).max(500),
-    payments: z.array(z.object({ tender: z.enum(tenders), amount: money, reference: z.string().max(60).nullish() })).max(10),
+      scriptLineId: z.string().uuid().nullish(), adjust: z.enum(['discount', 'override']).nullish(), approvalId: z.string().uuid().nullish() })).max(500),
+    payments: z.array(z.object({ tender: z.enum(tenders), amount: money, reference: z.string().max(60).nullish(),
+      gatewayToken: z.string().max(128).nullish(), gatewayPayload: z.record(z.string(), z.unknown()).nullish() })).max(10),
   }) }),
   z.object({ type: z.literal('till_entry'), userId: z.string().uuid().nullish(), data: z.object({
-    id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['petty_cash', 'account_payment']), tender: z.enum(drawerTenders),
-    amount: money, accountId: z.string().uuid().nullish(), note: z.string().max(200).nullish(), occurredAt: when,
+    id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['petty_cash', 'account_payment', 'cash_drop']), tender: z.enum(drawerTenders),
+    amount: money, accountId: z.string().uuid().nullish(), note: z.string().max(200).nullish(), approvalId: z.string().uuid().nullish(), occurredAt: when,
+  }) }),
+  z.object({ type: z.literal('till_event'), userId: z.string().uuid().nullish(), data: z.object({
+    id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['no_sale', 'void']), reason: z.string().max(200).nullish(),
+    detail: z.record(z.string(), z.unknown()).optional(), approvalId: z.string().uuid().nullish(), cashierCode: z.string().max(4).nullish(), occurredAt: when,
   }) }),
 ])
+const approveSchema = z.object({
+  tillId: z.string().uuid(), subjectId: z.string().uuid(), action: z.enum(approvalActions),
+  detail: z.record(z.string(), z.unknown()).default({}), staffCode: z.string().max(4), pin: z.string().max(40), cashierCode: z.string().max(4).nullish(),
+})
 const syncSchema = z.object({
   tillId: z.string().uuid(),
   deviceId: z.string().max(64).nullish(),
@@ -92,7 +103,9 @@ export function api() {
       const staff = await staffWithCodes(tx, 'till.use')
       return {
         staff: staff.map((s) => ({ c: s.code, n: s.name })),
-        tenant: { id: user.tenantId, name: user.tenantName, vatNumber: settings.vatNumber, receiptFooter: settings.receiptFooter, defaultFloat: settings.defaultFloat, cashRounding: settings.cashRounding, vatRate: settings.vatRate, buttons: settings.tillButtons },
+        tenant: { id: user.tenantId, name: user.tenantName, vatNumber: settings.vatNumber, receiptFooter: settings.receiptFooter, cashRounding: settings.cashRounding, vatRate: settings.vatRate, buttons: settings.tillButtons,
+          maxChange: settings.maxChange, cashDropThreshold: settings.cashDropThreshold, cashierDiscountPct: settings.cashierDiscountPct, cardTerminal: settings.cardTerminal },
+        noSaleReasons,
         user: { id: user.userId, name: user.name, roles: user.roles },
         tills: tills.map((t) => ({ id: t.id, code: t.code, name: t.name })),
         accounts: accounts.map((a) => ({
@@ -113,6 +126,34 @@ export function api() {
     const no = Number(c.req.param('no'))
     const script = Number.isInteger(no) ? await run(c, (tx) => scriptForTill(tx, no)) : null
     return script ? c.json(script) : c.json({ error: `no script number ${c.req.param('no')}` }, 404)
+  })
+
+  /** The run open on a till, so a till that lost its own record (cleared browser) can carry on with it rather than open a second. */
+  r.get('/till/open-run', async (c) => {
+    const tillId = c.req.query('till') ?? ''
+    if (!z.string().uuid().safeParse(tillId).success) throw new DomainError('which till?')
+    const open = await run(c, (tx) => openRunOnTill(tx, tillId))
+    return c.json({ run: open })
+  })
+
+  /** A sale found by its number or slip reference, with what is left to refund. Needs the server. */
+  r.get('/till/sales/:ref', async (c) => {
+    const sale = await run(c, (tx) => saleForRefund(tx, c.req.param('ref')))
+    return sale ? c.json(sale) : c.json({ error: `no sale ${c.req.param('ref')}` }, 404)
+  })
+
+  /**
+   * A supervisor allows something on the till with their staff code and second PIN. The PIN is checked
+   * here, never on the till; wrong PINs count towards the same lockout as logins, and towards the
+   * per-address limit on login attempts.
+   */
+  r.post('/till/approve', async (c) => {
+    const parsed = approveSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) throw new DomainError(parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`).join('; '))
+    const ip = clientIp(c) ?? 'unknown'
+    if (!c.get('loginLimiter').take(ip)) return c.json({ error: 'Too many tries from this computer. Wait a few minutes.' }, 429)
+    const ok = await run(c, (tx) => grantApproval(tx, parsed.data, { ip, userAgent: c.req.header('user-agent') ?? null }))
+    return ok ? c.json(ok) : c.json({ error: 'Wrong code or PIN, or that person cannot allow this.' }, 403)
   })
 
   /**
@@ -149,7 +190,12 @@ export function api() {
       await touchTill(tx, body.tillId, Math.max(0, (body.pending ?? 0) - results.filter((x) => x.status !== 'rejected').length))
       const runIds = [...new Set([...body.runIds, ...ops.filter((o) => o.type === 'open_run').map((o) => o.data.id)])]
       const runs = runIds.length ? await tx`select id, run_no, status from till_runs where id = any(${runIds}::uuid[])` : []
-      return { results, runs: Object.fromEntries(runs.map((r) => [r.id, { runNo: r.run_no, status: r.status }])) }
+      const open = await openRunOnTill(tx, body.tillId)
+      return {
+        results, runs: Object.fromEntries(runs.map((r) => [r.id, { runNo: r.run_no, status: r.status }])),
+        // Only whether a cash drop is due, never how much is in the drawer: the cashier counts blind.
+        cashDropDue: open ? await cashDropDue(tx, open.id) : false,
+      }
     })
     return c.json(out)
   })

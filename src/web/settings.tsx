@@ -3,6 +3,9 @@ import { findByCode, repriceItems } from '../domain/items.js'
 import { buttonColors, getSettings, parseTillButtons, updateSettings } from '../domain/settings.js'
 import { back, page, run, type Env } from './app.js'
 
+/** A number typed in the form, kept between 0 and max; left out when the form didn't send it. */
+const given = (v: unknown, max = Infinity) => (v === undefined || String(v).trim() === '' ? undefined : Math.min(max, Math.max(0, Number(v) || 0)))
+
 export function settingsRoutes() {
   const r = new Hono<Env>()
 
@@ -21,6 +24,13 @@ export function settingsRoutes() {
           <label>Highest believable cost per pack (P)<input name="maxSaneCost" type="number" min="1" value={s.maxSaneCost} /></label>
           <label>Till float to start a run (P)<input name="defaultFloat" type="number" step="0.01" min="0" value={s.defaultFloat.toFixed(2)} /></label>
           <label>Round cash to (P)<input name="cashRounding" type="number" step="0.01" min="0.01" value={s.cashRounding.toFixed(2)} /></label>
+          <label>Most change the till may give (P)<input name="maxChange" type="number" step="0.01" min="0" value={s.maxChange.toFixed(2)} /></label>
+          <label>Ask for a cash drop above (P)<input name="cashDropThreshold" type="number" step="0.01" min="0" value={s.cashDropThreshold.toFixed(2)} /></label>
+          <label>Discount a cashier may give alone (%)<input name="cashierDiscountPct" type="number" step="0.01" min="0" max="100" value={s.cashierDiscountPct} /></label>
+          <label>Card machine<select name="cardTerminal">
+            <option value="standalone" selected={s.cardTerminal === 'standalone'}>Separate machine: type its approval code</option>
+            <option value="integrated" selected={s.cardTerminal === 'integrated'}>Linked to the till (not available yet)</option>
+          </select></label>
           <label>VAT number (printed on till slips)<input name="vatNumber" value={s.vatNumber ?? ''} /></label>
           <label>Till slip footer<input name="receiptFooter" value={s.receiptFooter ?? ''} placeholder="Thank you. Get well soon." /></label>
           <label class="row" style="flex-direction:row"><input type="checkbox" name="allowNegative" checked={s.allowNegativeStock} /> Allow stock to go negative</label>
@@ -65,6 +75,10 @@ export function settingsRoutes() {
       allowNegativeStock: b.allowNegative === 'on',
       defaultFloat: Number(b.defaultFloat || 0),
       cashRounding: Number(b.cashRounding || 0.01),
+      maxChange: given(b.maxChange),
+      cashDropThreshold: given(b.cashDropThreshold),
+      cashierDiscountPct: given(b.cashierDiscountPct, 100),
+      cardTerminal: b.cardTerminal === undefined ? undefined : b.cardTerminal === 'integrated' ? 'integrated' : 'standalone',
       vatNumber: String(b.vatNumber ?? '').trim() || null,
       receiptFooter: String(b.receiptFooter ?? '').trim() || null,
     }, c.get('user').userId))

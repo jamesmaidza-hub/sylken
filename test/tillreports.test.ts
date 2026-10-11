@@ -11,7 +11,7 @@ import {
   accountStatements, accountTransactions, assistantSales, auditLog, contacts, debtors, markupReport, otcSales, pettyCash, salesDetail,
   salesJournal, tillPriceAlterations,
 } from '../src/domain/tillreports.js'
-import { appDb, newTenant } from './helpers.js'
+import { appDb, approvalFor, newTenant } from './helpers.js'
 
 let db: Sql
 let t: Awaited<ReturnType<typeof newTenant>>
@@ -23,24 +23,28 @@ const range = () => ({ from: today(), to: today() })
 
 describe('till reports', () => {
   it('reports accounts, sales, assistants, petty cash and price alterations from what the till recorded', async () => {
-    const { item, acc, run } = await t.as(async (tx) => {
+    const { item, acc, run, tillId } = await t.as(async (tx) => {
       const item = await createItem(tx, { stockCode: 'VITC', description: 'VITAMIN C 1000', packSize: 1, costPerPack: 20 })   // retail 34.20
       await postMovements(tx, [{ itemId: item.id, kind: 'opening', qtyUnits: 50 }])
       const acc = await createAccount(tx, { accountNo: 'A1', name: 'KGOSI TRADING', phone: '3900000', creditLimit: 100 })
       const run = randomUUID()
-      await openRun(tx, { id: run, tillId: (await listTills(tx))[0].id, openingFloat: 100, openedAt: new Date() })
-      return { item, acc, run }
+      const tillId = (await listTills(tx))[0].id
+      await openRun(tx, { id: run, tillId, openingFloat: 100, openedAt: new Date() }, t.userId)
+      return { item, acc, run, tillId }
     })
     // Opening balance from a correction made before the range.
     await t.as((tx) => postAccountEntry(tx, acc, { kind: 'adjustment', amount: 40, note: 'Brought forward' }, t.userId))
     await t.as((tx) => tx`update account_entries set occurred_at = now() - interval '40 days' where account_id = ${acc}`)
+    const overrideSale = randomUUID()
     await t.as(async (tx) => {
       await recordSale(tx, { id: randomUUID(), runId: run, kind: 'sale', occurredAt: new Date(), accountId: acc,
         lines: [{ itemId: item.id, qtyUnits: 2, listTotal: 68.4, lineTotal: 68.4 }], payments: [{ tender: 'account', amount: 68.4 }] }, { userId: t.userId })
-      await recordSale(tx, { id: randomUUID(), runId: run, kind: 'sale', occurredAt: new Date(), cashTendered: 30,
-        lines: [{ itemId: item.id, qtyUnits: 1, listTotal: 34.2, lineTotal: 30 }], payments: [{ tender: 'cash', amount: 30 }] }, { userId: t.userId })
+      await recordSale(tx, { id: overrideSale, runId: run, kind: 'sale', occurredAt: new Date(), cashTendered: 30,
+        lines: [{ itemId: item.id, qtyUnits: 1, listTotal: 34.2, lineTotal: 30, adjust: 'override', approvalId: await approvalFor(tx, tillId, overrideSale, 'price_override', { itemId: item.id, packPrice: 30 }) }],
+        payments: [{ tender: 'cash', amount: 30 }] }, { userId: t.userId })
       await recordTillEntry(tx, { id: randomUUID(), runId: run, kind: 'account_payment', tender: 'cash', amount: 50, accountId: acc, occurredAt: new Date() }, { userId: t.userId })
-      await recordTillEntry(tx, { id: randomUUID(), runId: run, kind: 'petty_cash', tender: 'cash', amount: 12.5, note: 'Milk', occurredAt: new Date() }, { userId: t.userId })
+      const milk = randomUUID()
+      await recordTillEntry(tx, { id: milk, runId: run, kind: 'petty_cash', tender: 'cash', amount: 12.5, note: 'Milk', approvalId: await approvalFor(tx, tillId, milk, 'petty_cash', { amount: 12.5 }), occurredAt: new Date() }, { userId: t.userId })
     })
 
     const [st] = await t.as((tx) => accountStatements(tx, range()))
