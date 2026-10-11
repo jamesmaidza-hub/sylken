@@ -16,7 +16,8 @@ export async function pharmacy(db: Sql) {
   const app = createApp(db)
   const person = async (roles: Role[], name: string) => {
     const u = await addUser(db, t.id, roles, name)
-    const cookie = await webLogin(app, u.email, u.password)
+    // The dispensary opens on a 2-letter dispenser code, which the screens keep in a cookie; each test person has typed theirs.
+    const cookie = `${await webLogin(app, u.email, u.password)}; rx_code=${u.staffCode}`
     return client(app, cookie, u)
   }
   const staff = {

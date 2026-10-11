@@ -70,8 +70,10 @@ describe('1.3 the server refuses every route a role does not allow', () => {
     expect(can(['dispenser'], 'rx.reverse')).toBe(false)
     expect(roles.filter((r) => can([r], 'rx.override'))).toEqual(['pharmacist'])
     expect(roles.filter((r) => can([r], 'rx.reverse'))).toEqual(['pharmacist'])
-    expect(roles.filter((r) => can([r], 'stock.adjust'))).toEqual(['manager'])
+    expect(roles.filter((r) => can([r], 'stock.adjust'))).toEqual(['supervisor', 'manager'])
     expect(roles.filter((r) => can([r], 'users.manage'))).toEqual(['manager'])
+    expect(can(['supervisor'], 'rx.view')).toBe(false)           // a supervisor runs the floor, not the dispensary
+    expect(can(['supervisor'], 'settings.manage')).toBe(false)
     expect(can(['pharmacist', 'manager'], 'users.manage')).toBe(true)
     expect(Object.keys(rolePermissions)).toEqual([...roles])
   })
