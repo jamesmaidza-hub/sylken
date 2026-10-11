@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Sql } from '../src/db/index.js'
-import { createItem } from '../src/domain/items.js'
+import { createItem, getItem } from '../src/domain/items.js'
 import { createApp } from '../src/web/app.js'
 import { appDb, newTenant, webLogin } from './helpers.js'
 
@@ -90,6 +90,27 @@ describe('web', () => {
     expect(a10).toContain('TWO SHELF ITEM')
     expect(a10).not.toContain('LOOSE ITEM')
     expect(await (await get('/items/bins?bin=-')).text()).toContain('LOOSE ITEM')
+  })
+
+  it('starts the bins folded and moves several ticked items to another bin without touching stock', async () => {
+    const { t, app, cookie, get } = await loggedIn()
+    const [a, b] = await t.as(async (tx) => [
+      await createItem(tx, { stockCode: 'M1', description: 'MOVE ONE', costPerPack: 5, bins: ['A1', 'Z9'] }),
+      await createItem(tx, { stockCode: 'M2', description: 'MOVE TWO', costPerPack: 5 }),
+    ])
+    const html = await (await get('/items/bins')).text()
+    expect(html).toContain('<details class="bin-group" data-bin="A1">')
+    expect(html).toContain('id="move-form"')
+    const body = new URLSearchParams([['move', `A1|${a.id}`], ['move', `-|${b.id}`], ['to', 'c3'], ['back', '/items/bins']])
+    const res = await app.request('/items/bins/move', { method: 'POST', headers: { cookie }, body })
+    const loc = new URL(res.headers.get('location')!, 'http://x')
+    expect([loc.pathname, loc.searchParams.get('open'), loc.searchParams.get('ok')]).toEqual(['/items/bins', 'C3', 'Moved 2 items to bin C3'])
+    const after = await t.as(async (tx) => [await getItem(tx, a.id), await getItem(tx, b.id)])
+    expect(after[0]!.bins).toEqual(['C3', 'Z9'])
+    expect(after[1]!.bins).toEqual(['C3'])
+    expect(after[0]!.onHandUnits).toBe(a.onHandUnits)
+    const logs = await t.as((tx) => tx`select entity_id from audit_log where action = 'item.bin_move'`)
+    expect(logs.map((r: any) => r.entity_id).sort()).toEqual([a.id, b.id].sort())
   })
 
   it('saves till quick buttons and sends them to the till', async () => {

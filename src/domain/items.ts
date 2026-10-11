@@ -262,3 +262,26 @@ export async function itemsByBin(tx: Tx, opts: { bin?: string; status?: string }
     .sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : binOrder(a, b)))
     .map(([b, list]) => ({ bin: b, items: list }))
 }
+
+/**
+ * Moves items from one shelf to another: each item loses `from` (or, for items with no bin,
+ * just gains `to`) and keeps any other bins it has. Stock quantities don't change.
+ * Returns how many items moved; each move is written to the audit log.
+ */
+export async function moveItemsToBin(tx: Tx, moves: { itemId: string; from: string | null }[], to: string, userId?: string): Promise<number> {
+  const target = to.trim().toUpperCase()
+  if (!target) throw new DomainError('type the bin to move the items to')
+  if (target.length > 40) throw new DomainError('a bin name is at most 40 characters')
+  let moved = 0
+  for (const m of moves) {
+    const item = await getItem(tx, m.itemId)
+    if (!item) throw new DomainError('unknown item', 'not_found', 404)
+    const from = m.from?.toUpperCase() ?? null
+    if (from === target) continue
+    const next = from && item.bins.includes(from) ? item.bins.map((b) => (b === from ? target : b)) : [...item.bins.filter((b) => b !== target), target]
+    await setBins(tx, item.id, next)
+    await audit(tx, userId, 'item.bin_move', 'item', item.id, { from: from ?? null, to: target, before: item.bins, after: [...new Set(next)] })
+    moved++
+  }
+  return moved
+}

@@ -100,9 +100,11 @@ tr.cur{outline:2px solid var(--accent);outline-offset:-2px;background:color-mix(
 .tabs a.on{color:var(--ink);background:var(--panel);box-shadow:inset 0 -3px 0 var(--accent);font-weight:600}section.tab{margin-top:8px}section.tab>.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
 .grid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}.items-form>.panel>.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
 .print-only{display:none}.bin-group h2{margin-top:18px}
+details.bin-group{margin:6px 0;border:1px solid var(--line);border-radius:8px;background:var(--panel)}details.bin-group>summary{cursor:pointer;padding:10px 14px;font-size:16px;display:flex;gap:12px;align-items:baseline;list-style:none}details.bin-group>summary::-webkit-details-marker{display:none}details.bin-group>summary::before{content:'▸';width:12px;color:var(--muted)}details.bin-group[open]>summary::before{content:'▾'}details.bin-group>summary .bin-name{font-weight:600;min-width:120px}details.bin-group>summary:hover{background:var(--bg)}details.bin-group>.wrap,details.bin-group>table{margin:0 8px 10px}
+.move-bar{position:sticky;top:0;z-index:5;gap:10px;align-items:center;flex-wrap:wrap}
 @media print{header,.noprint,.toolbar,.msg{display:none!important}.print-only{display:block}th.print-only,td.print-only{display:table-cell}
   body{background:#fff;color:#000;font-size:12px}main{max-width:none;padding:0}table{background:#fff}th,td{padding:3px 6px;border-bottom:1px solid #999}
-  td.counted,th.counted{width:90px;border-left:1px solid #999}.bin-group{break-inside:auto}.bin-group h2{break-after:avoid;font-size:14px}tr{break-inside:avoid}a{color:#000;text-decoration:none}.wrap{overflow:visible}}
+  td.counted,th.counted{width:90px;border-left:1px solid #999}.bin-group{break-inside:auto;border:0}details.bin-group>summary{padding:8px 0 4px;font-size:14px}details.bin-group>summary::before{content:none!important}.bin-group h2{break-after:avoid;font-size:14px}tr{break-inside:avoid}a{color:#000;text-decoration:none}.wrap{overflow:visible}}
 @media (max-width:980px){.rx-desk{grid-template-columns:1fr}}
 @media (max-width:640px){.rx-l{width:100%}.rx-info{margin-left:0}}
 /* Touch screen layout: bigger rows, fields and buttons; screens may add big-button panels (.touch-only). */

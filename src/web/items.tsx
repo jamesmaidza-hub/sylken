@@ -2,13 +2,13 @@ import { Hono } from 'hono'
 import { raw } from 'hono/html'
 import { num } from '../db/index.js'
 import { DomainError } from '../domain/errors.js'
-import { createItem, getItem, itemMargins, itemsByBin, listBins, priceFor, searchItems, updateItem, type ItemInput } from '../domain/items.js'
+import { createItem, getItem, itemMargins, itemsByBin, listBins, moveItemsToBin, priceFor, searchItems, updateItem, type ItemInput } from '../domain/items.js'
 import { setMinMax } from '../domain/minmax.js'
 import { itemMovements } from '../domain/reports.js'
 import { getSettings } from '../domain/settings.js'
 import { adjustStock } from '../domain/stock.js'
 import { packsToUnits } from '../domain/units.js'
-import { back, page, run, type Env } from './app.js'
+import { back, can, page, run, type Env } from './app.js'
 import { dateTime, money, pct, qty, StatusChip } from './layout.js'
 
 /** Link to an item that keeps the search it was found by, so the results stay on screen above it. */
@@ -27,6 +27,35 @@ const tabs = `
   }
   nav.addEventListener('click', (e) => { const a = e.target.closest('a'); if (!a) return; e.preventDefault(); history.replaceState(null, '', '#' + a.dataset.tab); show(a.dataset.tab) })
   show(location.hash.slice(1))
+})()`
+
+// Items by bin: change the filter at once, fold bins, tick items to move, print with every bin open.
+const binsScript = `
+(() => {
+  const f = document.getElementById('bins-filter')
+  f.querySelectorAll('select').forEach((s) => s.addEventListener('change', () => f.submit()))
+  const all = () => document.querySelectorAll('details.bin-group')
+  document.getElementById('bins-open').onclick = () => all().forEach((d) => { d.open = true })
+  document.getElementById('bins-close').onclick = () => all().forEach((d) => { d.open = false })
+  document.getElementById('bins-print').onclick = () => window.print()
+  let was = []
+  addEventListener('beforeprint', () => { was = [...all()].map((d) => d.open); all().forEach((d) => { d.open = true }) })
+  addEventListener('afterprint', () => all().forEach((d, i) => { d.open = was[i] ?? d.open }))
+  const mf = document.getElementById('move-form'); if (!mf) return
+  const count = () => {
+    const n = document.querySelectorAll('input[name=move]:checked').length
+    document.getElementById('move-count').textContent = n ? n + ' item' + (n === 1 ? '' : 's') + ' ticked' : 'Tick items to move them'
+    document.getElementById('move-go').disabled = !n
+  }
+  document.addEventListener('change', (e) => {
+    const t = e.target
+    if (t.classList && t.classList.contains('tick-all')) t.closest('table').querySelectorAll('input[name=move]').forEach((x) => { x.checked = t.checked })
+    if (t.name === 'move' || (t.classList && t.classList.contains('tick-all'))) count()
+  })
+  mf.addEventListener('submit', (e) => {
+    const n = document.querySelectorAll('input[name=move]:checked').length
+    if (!confirm('Move ' + n + ' item' + (n === 1 ? '' : 's') + ' to bin ' + mf.to.value.trim().toUpperCase() + '?')) e.preventDefault()
+  })
 })()`
 
 const optNum = (v: unknown) => (v === undefined || v === null || String(v).trim() === '' ? null : Number(v))
@@ -121,34 +150,50 @@ export function itemRoutes() {
   r.get('/bins', async (c) => {
     const bin = c.req.query('bin') || ''
     const status = c.req.query('status') || undefined
+    const open = c.req.query('open') ?? ''
     const { groups, bins, tz } = await run(c, async (tx) => ({ groups: await itemsByBin(tx, { bin, status }), bins: await listBins(tx), tz: (await getSettings(tx)).timezone }))
     const count = groups.reduce((n, g) => n + g.items.length, 0)
+    const shelves = groups.filter((g) => g.bin).length
+    const mover = can(c, 'stock.adjust')
+    const back = `/items/bins?bin=${encodeURIComponent(bin)}&status=${encodeURIComponent(status ?? '')}`
     return page(c, 'Items by bin', (
       <>
         <div class="row"><h1>Items by bin</h1><span class="spacer" />
           <a class="btn secondary noprint" href="/items">Search items</a>
-          <button type="button" class="noprint" onclick="window.print()">🖨 Print list</button></div>
-        <form class="row panel noprint">
-          <label class="f">Bin<select name="bin" onchange="this.form.submit()">
+          <button type="button" class="secondary noprint" id="bins-open">Open all</button>
+          <button type="button" class="secondary noprint" id="bins-close">Close all</button>
+          <button type="button" class="noprint" id="bins-print">🖨 Print list</button></div>
+        <form class="row panel noprint" id="bins-filter">
+          <label class="f">Bin<select name="bin">
             <option value="">All bins</option>
             {bins.map((b) => <option value={b} selected={b === bin.toUpperCase()}>{b}</option>)}
             <option value="-" selected={bin === '-'}>No bin yet</option>
           </select></label>
-          <label class="f">Status<select name="status" onchange="this.form.submit()">
+          <label class="f">Status<select name="status">
             <option value="">Active and quarantined</option>
             {['active', 'dormant', 'quarantined', 'discontinued'].map((s) => <option value={s} selected={s === status}>{s}</option>)}
           </select></label>
           <button class="secondary">Show</button>
-          <span class="spacer" /><span class="muted">{count} item{count === 1 ? '' : 's'} on {groups.filter((g) => g.bin).length} bin{groups.filter((g) => g.bin).length === 1 ? '' : 's'}</span>
+          <span class="spacer" /><span class="muted">{count} item{count === 1 ? '' : 's'} on {shelves} bin{shelves === 1 ? '' : 's'}</span>
         </form>
+        {mover && <form method="post" action="/items/bins/move" class="row panel noprint move-bar" id="move-form">
+          <input type="hidden" name="back" value={back} />
+          <b id="move-count">Tick items to move them</b>
+          <label class="row" style="gap:6px">to bin<input name="to" list="bin-names" required autocomplete="off" placeholder="e.g. A12" style="width:140px;text-transform:uppercase" /></label>
+          <datalist id="bin-names">{bins.map((b) => <option value={b} />)}</datalist>
+          <button id="move-go" disabled>Move</button>
+          <span class="hint">Only the shelf changes. Stock on hand stays the same.</span>
+        </form>}
         <p class="print-only">Printed {new Date().toLocaleString('en-GB', { timeZone: tz })}. Count each item and write the number in the Counted column.</p>
         {groups.map((g) => (
-          <section class="bin-group">
-            <h2>{g.bin ? <>Bin {g.bin}</> : 'No bin yet'} <span class="muted" style="font-weight:400">· {g.items.length} item{g.items.length === 1 ? '' : 's'}</span></h2>
+          <details class="bin-group" open={!!bin || open === (g.bin ?? '-')} data-bin={g.bin ?? '-'}>
+            <summary><span class="bin-name">{g.bin ? <>Bin {g.bin}</> : 'No bin yet'}</span> <span class="muted">{g.items.length} item{g.items.length === 1 ? '' : 's'}</span></summary>
             <div class="wrap"><table>
-              <thead><tr><th>Code</th><th>Description</th><th class="n">Pack</th><th class="n">On hand</th><th class="n noprint">Retail</th><th class="noprint">Status</th><th class="print-only counted">Counted</th></tr></thead>
+              <thead><tr>{mover && <th class="noprint"><input type="checkbox" class="tick-all" title="Tick every item in this bin" /></th>}
+                <th>Code</th><th>Description</th><th class="n">Pack</th><th class="n">On hand</th><th class="n noprint">Retail</th><th class="noprint">Status</th><th class="print-only counted">Counted</th></tr></thead>
               <tbody>{g.items.map((i) => (
                 <tr data-href={`/items/${i.id}`}>
+                  {mover && <td class="noprint"><input type="checkbox" name="move" form="move-form" value={`${g.bin ?? '-'}|${i.id}`} /></td>}
                   <td>{i.stockCode}</td><td><a href={`/items/${i.id}`}>{i.description}</a>{i.bins.length > 1 && <span class="hint"> also in {i.bins.filter((b) => b !== g.bin).join(', ')}</span>}</td>
                   <td class="n">{i.packSize}</td><td class={`n ${i.onHandUnits < 0 ? 'neg' : ''}`}>{qty(i.onHandUnits, i.packSize)}</td>
                   <td class="n noprint">{money(i.retailPerPack)}</td><td class="noprint"><StatusChip status={i.status} reason={i.statusReason} /></td>
@@ -156,12 +201,30 @@ export function itemRoutes() {
                 </tr>
               ))}</tbody>
             </table></div>
-          </section>
+          </details>
         ))}
         {!groups.length && <p class="muted">No items here.</p>}
-        <p class="hint noprint">A bin is set on the item's General tab (Bins, comma separated). An item kept on two shelves shows under both.</p>
+        <p class="hint noprint">Click a bin to open it. A bin is also set on the item's General tab (Bins, comma separated). An item kept on two shelves shows under both.</p>
+        <script>{raw(binsScript)}</script>
       </>
     ))
+  })
+
+  r.post('/bins/move', async (c) => {
+    const b = await c.req.parseBody({ all: true })
+    const picked = ([] as unknown[]).concat(b.move ?? []).map(String)
+    if (!picked.length) throw new DomainError('tick the items to move first')
+    const moves = picked.map((v) => {
+      const [from, itemId] = v.split('|')
+      return { from: from === '-' ? null : from, itemId }
+    })
+    const to = String(b.to ?? '')
+    const n = await run(c, (tx) => moveItemsToBin(tx, moves, to, c.get('user').userId))
+    const target = to.trim().toUpperCase()
+    const backTo = new URL(String(b.back ?? '').startsWith('/items/bins') ? String(b.back) : '/items/bins', 'http://x')
+    for (const k of ['open', 'ok', 'err']) backTo.searchParams.delete(k)
+    backTo.searchParams.set('open', target)
+    return back(c, `${backTo.pathname}${backTo.search}`, { ok: `Moved ${n} item${n === 1 ? '' : 's'} to bin ${target}` })
   })
 
   r.get('/new', async (c) => {
