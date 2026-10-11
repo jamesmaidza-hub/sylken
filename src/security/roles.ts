@@ -15,7 +15,7 @@ export const roleLabels: Record<Role, string> = {
   manager: 'Manager',
 }
 
-/** Roles that must use a second factor (authenticator code) at every login. */
+/** Roles that must use a second PIN at every login. */
 export const secondFactorRoles: readonly Role[] = ['pharmacist', 'manager']
 
 export const permissions = {

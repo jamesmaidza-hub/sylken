@@ -17,5 +17,6 @@ export const security = {
   ipAttempts: 20,
   ipWindowMinutes: 15,
   minPasswordLength: 10,
-  recoveryCodes: 10,
+  /** Digits in a second PIN, at least. */
+  minPinLength: 6,
 } as const

@@ -1,16 +1,14 @@
 import { Hono } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
-import {
-  beginSecondFactorSetup, finishSecondFactorSetup, login, loginFailedMessage, logout, verifySecondFactor,
-} from '../domain/auth.js'
+import { login, loginFailedMessage, logout, needsPinSetup, setUpSecondPin, verifySecondFactor } from '../domain/auth.js'
+import { DomainError } from '../domain/errors.js'
 import { security } from '../security/config.js'
-import { otpauthUri } from '../security/totp.js'
 import { clientIp, type Ctx, type Env } from './app.js'
 import { Layout } from './layout.js'
 
 /**
- * Logging in: email and password, then for pharmacists and managers a six-digit code from an
- * authenticator app. The first time, the app is set up here and recovery codes are shown once.
+ * Logging in: email and password, then for pharmacists and managers a second PIN. The first
+ * time (or after a manager resets it) they choose the PIN here.
  */
 
 export const SESSION_COOKIE = 'sylken_session'
@@ -67,43 +65,40 @@ export function loginRoutes() {
     return c.redirect(c.req.query('idle') ? '/login?idle=1' : '/login')
   })
 
-  r.get('/login/2fa', (c) => c.html(
-    <Box title="Second step" err={c.req.query('err')}>
-      <p>Open the authenticator app on your phone and type the six-digit code for sylken.</p>
-      <form method="post" action="/login/2fa" style="display:grid;gap:10px">
-        <label class="f">Code<input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required maxlength={24} /></label>
-        <button type="submit">Continue</button>
-      </form>
-      <p class="hint">Lost your phone? Type one of your recovery codes instead, or ask a manager to reset your second step.</p>
-      <p><a href="/logout">Cancel</a></p>
-    </Box>,
-  ))
+  r.get('/login/2fa', async (c) => {
+    if (await needsPinSetup(c.get('db'), getCookie(c, SESSION_COOKIE)!)) return c.redirect('/login/2fa/setup')
+    return c.html(
+      <Box title="Second PIN" err={c.req.query('err')}>
+        <p>Pharmacists and managers type their second PIN as well as the password.</p>
+        <form method="post" action="/login/2fa" style="display:grid;gap:10px">
+          <label class="f">Second PIN<input name="pin" type="password" inputmode="numeric" autocomplete="off" autofocus required maxlength={20} /></label>
+          <button type="submit">Continue</button>
+        </form>
+        <p class="hint">Forgot it? Ask a manager to reset your second PIN.</p>
+        <p><a href="/logout">Cancel</a></p>
+      </Box>,
+    )
+  })
 
   r.post('/login/2fa', async (c) => {
     const body = await c.req.parseBody()
-    const token = await verifySecondFactor(c.get('db'), getCookie(c, SESSION_COOKIE)!, String(body.code ?? ''), meta(c))
-    if (!token) return c.redirect('/login/2fa?err=' + encodeURIComponent('That code is not right. Check the time on your phone and try the newest code.'))
+    const token = await verifySecondFactor(c.get('db'), getCookie(c, SESSION_COOKIE)!, String(body.pin ?? ''), meta(c))
+    if (!token) return c.redirect('/login/2fa?err=' + encodeURIComponent(`That PIN is not right. After ${security.maxFailures} wrong tries in a row the login locks for ${security.lockMinutes} minutes.`))
     setSession(c, token)
     return c.redirect('/')
   })
 
   r.get('/login/2fa/setup', async (c) => {
-    const { secret, email } = await beginSecondFactorSetup(c.get('db'), getCookie(c, SESSION_COOKIE)!)
-    c.header('cache-control', 'no-store')
+    if (!(await needsPinSetup(c.get('db'), getCookie(c, SESSION_COOKIE)!))) return c.redirect('/login/2fa')
     return c.html(
-      <Box title="Set up the second step" err={c.req.query('err')}>
-        <p>Pharmacists and managers need a code from their phone each time they log in, so a stolen password is not enough on its own.</p>
-        <ol>
-          <li>Install an authenticator app on your phone (Google Authenticator or Microsoft Authenticator).</li>
-          <li>In the app choose <b>Add account</b>, then <b>Enter a setup key</b>.</li>
-          <li>Account name: <b>sylken</b>. Key: <code style="font-size:16px;word-break:break-all">{secret.replace(/(.{4})/g, '$1 ').trim()}</code>. Type: time based.</li>
-          <li>Type the six-digit code the app shows below.</li>
-        </ol>
-        <p class="hint">On a phone you can tap <a href={otpauthUri(secret, email)}>this link</a> instead of typing the key.</p>
+      <Box title="Choose a second PIN" err={c.req.query('err')}>
+        <p>Pharmacists and managers type a second PIN after the password each time they log in. Choose one now.</p>
         <form method="post" action="/login/2fa/setup" style="display:grid;gap:10px">
-          <label class="f">Code from the app<input name="code" inputmode="numeric" autocomplete="one-time-code" autofocus required maxlength={8} /></label>
-          <button type="submit">Finish setting up</button>
+          <label class="f">New second PIN ({security.minPinLength} or more digits)<input name="pin" type="password" inputmode="numeric" autocomplete="off" autofocus required minlength={security.minPinLength} maxlength={20} /></label>
+          <label class="f">Type it again<input name="again" type="password" inputmode="numeric" autocomplete="off" required minlength={security.minPinLength} maxlength={20} /></label>
+          <button type="submit">Save PIN and continue</button>
         </form>
+        <p class="hint">Not your birthday, not 123456, and not one digit repeated. Don't write it next to the password.</p>
         <p><a href="/logout">Cancel</a></p>
       </Box>,
     )
@@ -111,17 +106,14 @@ export function loginRoutes() {
 
   r.post('/login/2fa/setup', async (c) => {
     const body = await c.req.parseBody()
-    const res = await finishSecondFactorSetup(c.get('db'), getCookie(c, SESSION_COOKIE)!, String(body.code ?? ''), meta(c))
-    if (!res) return c.redirect('/login/2fa/setup?err=' + encodeURIComponent('That code is not right. Check the key was typed exactly and try the newest code.'))
-    setSession(c, res.token)
-    c.header('cache-control', 'no-store')
-    return c.html(
-      <Box title="Recovery codes" ok="Your second step is set up.">
-        <p><b>Write these recovery codes down and keep them somewhere safe, away from your phone.</b> Each one works once, in place of a code from the app, if your phone is lost. They will not be shown again.</p>
-        <pre style="font-size:16px;line-height:1.6">{res.recoveryCodes.join('\n')}</pre>
-        <p><a class="btn" href="/">I have written them down</a></p>
-      </Box>,
-    )
+    try {
+      const token = await setUpSecondPin(c.get('db'), getCookie(c, SESSION_COOKIE)!, String(body.pin ?? ''), String(body.again ?? ''), meta(c))
+      setSession(c, token)
+      return c.redirect('/?ok=' + encodeURIComponent('Second PIN saved.'))
+    } catch (e) {
+      if (e instanceof DomainError && e.status !== 401) return c.redirect('/login/2fa/setup?err=' + encodeURIComponent(e.message))
+      throw e
+    }
   })
 
   return r

@@ -2,8 +2,8 @@ import { sql, withTenant } from '../db/index.js'
 import { resetSecondFactor, setPassword, unlockUser } from '../domain/users.js'
 import { args } from './args.js'
 
-// For whoever runs the server, when the only manager is locked out or has lost their phone
-// and recovery codes. Every change is written to the pharmacy's audit log.
+// For whoever runs the server, when the only manager is locked out or has forgotten their second
+// PIN. Every change is written to the pharmacy's audit log.
 const a = args()
 if (!a.email || !(a.unlock || a['reset-2fa'] || a.password)) {
   console.error('usage: npm run user:reset -- --email you@example.com [--unlock] [--reset-2fa] [--password NEW]')
