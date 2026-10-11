@@ -14,6 +14,8 @@ export interface Settings {
   defaultFloat: number
   /** When the drawer is expected to hold more cash than this, the till asks for a cash drop. 0 = no alert. */
   cashDropLimit: number
+  /** The most change the till will give on one sale, to catch a mistyped amount. 0 = no limit. */
+  maxChange: number
   vatNumber: string | null
   receiptFooter: string | null
   timezone: string
@@ -47,6 +49,7 @@ export async function getSettings(tx: Tx): Promise<Settings> {
     maxSaneCost: num(s.max_sane_cost),
     defaultFloat: num(s.default_float),
     cashDropLimit: num(s.cash_drop_limit),
+    maxChange: num(s.max_change),
     vatNumber: s.vat_number,
     receiptFooter: s.receipt_footer,
     timezone: s.timezone,
@@ -74,6 +77,7 @@ const columns: Record<keyof Settings, string> = {
   maxSaneCost: 'max_sane_cost',
   defaultFloat: 'default_float',
   cashDropLimit: 'cash_drop_limit',
+  maxChange: 'max_change',
   vatNumber: 'vat_number',
   receiptFooter: 'receipt_footer',
   timezone: 'timezone',

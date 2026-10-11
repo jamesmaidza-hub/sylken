@@ -120,6 +120,7 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['POST', '/cashup/tills', 'cashup.manage'],
   ['GET', '/cashup/runs/:id', 'cashup.own'],
   ['POST', '/cashup/runs/:id/close', 'cashup.own'],
+  ['GET', '/cashup/runs/:id/z', 'cashup.own'],
   ['GET', '/cashup/problems', 'cashup.manage'],
   ['POST', '/cashup/problems/:id/resolve', 'cashup.manage'],
   ['GET', '/sales', 'sales.view'],

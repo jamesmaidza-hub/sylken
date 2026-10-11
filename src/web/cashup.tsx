@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
+import { raw } from 'hono/html'
 import { DomainError } from '../domain/errors.js'
+import { cashDenominations, cleanBreakdown, denominationKind, denominationLabel, getZReport } from '../domain/zreport.js'
 import { listSales, salesSummary, shopToday } from '../domain/sales.js'
 import { getSettings } from '../domain/settings.js'
 import { closeRun, countedTenders, createTill, listTills, noSaleReasons, runSummary, tenderLabels, type NoSaleReason, type Tender } from '../domain/till.js'
@@ -202,14 +204,25 @@ export function cashupRoutes() {
               </tbody>
             </table></div>
             {s.note && <p>Note: {s.note}</p>}
+            <p><a class="btn" href={`/cashup/runs/${s.id}/z`}>Z-report</a></p>
           </>
         ) : (
           <>
             <h2>Cash up this run</h2>
             <form method="post" action={`/cashup/runs/${s.id}/close`} class="grid panel">
-              {countedTenders.map((t) => (
+              <fieldset style="grid-column:1/-1;border:1px solid var(--line);border-radius:8px;padding:10px 14px">
+                <legend><b>Cash: how many notes and coins are in the drawer</b> (the whole drawer, including the float)</legend>
+                <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px 12px">
+                  {cashDenominations.map((d, i) => (
+                    <label>{denominationKind(d)} {denominationLabel(d)}
+                      <input name={`d_${d}`} type="number" min="0" step="1" inputmode="numeric" value="0" data-denom={String(d)} autofocus={i === 0} /></label>
+                  ))}
+                </div>
+                <p style="margin:8px 0 0">Cash counted: <b id="cash-total">{money(0)}</b>{!blind && <span class="hint"> · system: {money(s.expected.cash)}</span>}</p>
+              </fieldset>
+              {countedTenders.filter((t) => t !== 'cash').map((t) => (
                 <label>{tenderLabels[t]} counted (P){!blind && <span class="hint">system: {money(s.expected[t])}</span>}
-                  <input name={t} type="number" step="0.01" min="0" required autofocus={t === 'cash'} /></label>
+                  <input name={t} type="number" step="0.01" min="0" required /></label>
               ))}
               <label>Float left in the drawer (P)<input name="floatKept" type="number" step="0.01" min="0" value={(defaultFloat || s.openingFloat).toFixed(2)} required /></label>
               <label style="grid-column:1/-1">Note<input name="note" placeholder="Anything the owner should know" /></label>
@@ -220,6 +233,9 @@ export function cashupRoutes() {
               </div>
             </form>
             <p class="hint">Make sure the till shows nothing waiting to send before cashing up, or late sales will show as a shortage on this run.</p>
+            <script>{raw(`(function(){var f=document.querySelector('form[action$="/close"]');if(!f)return;var t=document.getElementById('cash-total'),ins=[].slice.call(f.querySelectorAll('[data-denom]'));
+function sum(){var s=0;ins.forEach(function(i){s+=Math.round(parseFloat(i.dataset.denom)*100)*(parseInt(i.value,10)||0)});t.textContent='P'+(s/100).toLocaleString('en',{minimumFractionDigits:2,maximumFractionDigits:2})}
+ins.forEach(function(i){i.addEventListener('input',sum);i.addEventListener('focus',function(){i.select()})});sum()})()`)}</script>
           </>
         )}
         {entries.length > 0 && (
@@ -247,11 +263,89 @@ export function cashupRoutes() {
   r.post('/runs/:id/close', async (c) => {
     const b = await c.req.parseBody()
     const n = (k: string) => (String(b[k] ?? '').trim() === '' ? NaN : Number(b[k]))
+    // The cash is counted in notes and coins; the total is worked out here, never typed.
+    const counts: Record<string, unknown> = {}
+    for (const d of cashDenominations) counts[String(d)] = b[`d_${d}`]
+    const cash = cleanBreakdown(counts).total
     const s = await run(c, (tx) => closeRun(tx, c.req.param('id'), {
-      counted: { cash: n('cash'), card: n('card'), cheque: n('cheque') }, floatKept: n('floatKept'), note: String(b.note ?? ''),
+      counted: { cash, card: n('card'), cheque: n('cheque') }, breakdown: counts, floatKept: n('floatKept'), note: String(b.note ?? ''),
     }, c.get('user').userId))
     const msg = s.surplus === 0 ? 'Cashed up: the run balances.' : `Cashed up: ${money(Math.abs(s.surplus!))} ${s.surplus! < 0 ? 'short' : 'over'}.`
-    return back(c, `/cashup/runs/${s.id}`, { ok: msg })
+    return back(c, `/cashup/runs/${s.id}/z`, { ok: msg })
+  })
+
+  /** The Z-report made when the run was cashed up, as it was then. ?format=json gives the same as a data file. */
+  r.get('/runs/:id/z', async (c) => {
+    const id = c.req.param('id')
+    const { z, live } = await run(c, async (tx) => ({ z: await getZReport(tx, id), live: await runSummary(tx, id) }))
+    if (!live) throw new DomainError('unknown till run', 'not_found', 404)
+    if (!z) return back(c, `/cashup/runs/${id}`, { err: live.status === 'open' ? 'This run has not been cashed up yet, so it has no Z-report.' : 'This run was cashed up before Z-reports were made.' })
+    if (c.req.query('format') === 'json') {
+      c.header('content-type', 'application/json; charset=utf-8')
+      c.header('content-disposition', `attachment; filename="z-report-${z.zNo}.json"`)
+      return c.body(JSON.stringify(z, null, 2))
+    }
+    const tl = (t: string) => tenderLabels[t as Tender] ?? t
+    const when = (iso: string | null) => (iso ? dateTime(iso) : '')
+    return page(c, `Z-report ${z.zNo}`, (
+      <>
+        <div class="row noprint"><h1>Z-report {z.zNo}</h1><span class="spacer" />
+          <a class="btn secondary" href={`/cashup/runs/${id}`}>Run {z.runNo}</a>
+          <a class="btn secondary" href={`/cashup/runs/${id}/z?format=json`}>Download data (JSON)</a>
+          <button type="button" onclick="window.print()">🖨 Print</button></div>
+        <div class="panel">
+          <h2 style="margin-top:0">{z.shop.name} · Z{z.zNo}</h2>
+          <p class="muted" style="margin:0">{z.shop.vatNumber && `VAT no. ${z.shop.vatNumber} · `}Shift {z.shiftId.slice(0, 8)} · run {z.runNo} · till {z.till.name} ({z.till.code})</p>
+          <p>Opened {when(z.openedAt)}{z.openedBy && ` by ${z.openedBy}`}, float {money(z.openingFloat)}.<br />
+            Cashed up {when(z.closedAt)}{z.closedBy && ` by ${z.closedBy}`}; {money(z.floatKept ?? 0)} left in the drawer. This report was made {when(z.generatedAt)}.</p>
+          {z.note && <p>Note: {z.note}</p>}
+        </div>
+        <div class="stats">
+          <div class="stat"><b>{z.sales.count}</b><span>sales{z.sales.refunds ? `, ${z.sales.refunds} refunds` : ''}</span></div>
+          <div class="stat"><b>{money(z.sales.total)}</b><span>takings incl VAT ({money(z.sales.vat)} VAT)</span></div>
+          <div class="stat"><b>{money(z.pettyCash)}</b><span>petty cash paid out</span></div>
+          <div class="stat"><b>{money(z.cashDrops)}</b><span>cash dropped to the safe</span></div>
+          <div class="stat"><b>{z.noSales}</b><span>no-sale drawer opening{z.noSales === 1 ? '' : 's'}</span></div>
+          <div class="stat"><b class={z.totalVariance < 0 ? 'neg' : z.totalVariance > 0 ? 'pos' : ''}>{money(z.totalVariance)}</b><span>{z.totalVariance < 0 ? 'short' : z.totalVariance > 0 ? 'over' : 'balanced'}</span></div>
+        </div>
+        <h2>Expected against counted</h2>
+        <div class="wrap"><table>
+          <thead><tr><th>Tender</th><th class="n">Expected</th><th class="n">Counted</th><th class="n">Variance</th></tr></thead>
+          <tbody>{z.counts.map((x) => <tr><td>{tl(x.tender)}</td><td class="n">{money(x.expected)}</td><td class="n">{money(x.counted)}</td><td class="n">{signed(x.variance)}</td></tr>)}
+            <tr><td><b>Total</b></td><td /><td /><td class="n"><b>{signed(z.totalVariance)}</b></td></tr></tbody>
+        </table></div>
+        <p class="hint">Cash expected = opening float + cash takings + cash account payments − petty cash − cash drops.</p>
+        {z.cashBreakdown && (
+          <>
+            <h2>Notes and coins counted</h2>
+            <div class="wrap"><table>
+              <thead><tr><th>Note or coin</th><th class="n">Number</th><th class="n">Value</th></tr></thead>
+              <tbody>{cashDenominations.filter((d) => z.cashBreakdown![String(d)]).map((d) => (
+                <tr><td>{denominationKind(d)} {denominationLabel(d)}</td><td class="n">{z.cashBreakdown![String(d)]}</td><td class="n">{money(d * z.cashBreakdown![String(d)])}</td></tr>
+              ))}</tbody>
+            </table></div>
+          </>
+        )}
+        <h2>By tender</h2>
+        <div class="wrap"><table>
+          <thead><tr><th>Tender</th><th class="n">Sales</th><th class="n">Account payments</th></tr></thead>
+          <tbody>{(Object.keys(z.byTender) as string[]).filter((t) => (z.byTender as any)[t] !== 0 || (z.accountPayments as any)[t]).map((t) => (
+            <tr><td>{tl(t)}</td><td class="n">{money((z.byTender as any)[t])}</td><td class="n">{(z.accountPayments as any)[t] !== undefined ? money((z.accountPayments as any)[t]) : ''}</td></tr>
+          ))}</tbody>
+        </table></div>
+        {z.cashiers.length > 0 && (
+          <>
+            <h2>By cashier code</h2>
+            <div class="wrap"><table>
+              <thead><tr><th>Cashier</th><th class="n">Sales</th><th class="n">Total</th></tr></thead>
+              <tbody>{z.cashiers.map((x) => <tr><td>{x.code ?? 'no code'}</td><td class="n">{x.sales}</td><td class="n">{money(x.total)}</td></tr>)}</tbody>
+            </table></div>
+          </>
+        )}
+        {live.late.count > 0 && <div class="msg err">{live.late.count} sale(s) or entries ({money(live.late.total)} in sales) reached the server after this run was cashed up. They are not in this Z-report, which is kept as it was; see the run page.</div>}
+        <p class="hint">This report is a record: it is numbered, saved as it was at cash-up, and cannot be changed. The run is locked.</p>
+      </>
+    ))
   })
 
   r.get('/problems', async (c) => {

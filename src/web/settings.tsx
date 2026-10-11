@@ -21,6 +21,7 @@ export function settingsRoutes() {
           <label>Highest believable cost per pack (P)<input name="maxSaneCost" type="number" min="1" value={s.maxSaneCost} /></label>
           <label>Till float to start a run (P)<input name="defaultFloat" type="number" step="0.01" min="0" value={s.defaultFloat.toFixed(2)} /></label>
           <label>Ask for a cash drop when the drawer holds more than (P, 0 = never)<input name="cashDropLimit" type="number" step="0.01" min="0" value={s.cashDropLimit.toFixed(2)} /></label>
+          <label>Largest change the till will give (P, 0 = no limit)<input name="maxChange" type="number" step="0.01" min="0" value={s.maxChange.toFixed(2)} /></label>
           <label>Round cash to (P)<input name="cashRounding" type="number" step="0.01" min="0.01" value={s.cashRounding.toFixed(2)} /></label>
           <label>VAT number (printed on till slips)<input name="vatNumber" value={s.vatNumber ?? ''} /></label>
           <label>Till slip footer<input name="receiptFooter" value={s.receiptFooter ?? ''} placeholder="Thank you. Get well soon." /></label>
@@ -66,6 +67,7 @@ export function settingsRoutes() {
       allowNegativeStock: b.allowNegative === 'on',
       defaultFloat: Number(b.defaultFloat || 0),
       cashDropLimit: Math.max(0, Number(b.cashDropLimit || 0)),
+      maxChange: Math.max(0, Number(b.maxChange || 0)),
       cashRounding: Number(b.cashRounding || 0.01),
       vatNumber: String(b.vatNumber ?? '').trim() || null,
       receiptFooter: String(b.receiptFooter ?? '').trim() || null,

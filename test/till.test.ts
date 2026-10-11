@@ -3,6 +3,8 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Sql } from '../src/db/index.js'
 import { accountStatement, ageAnalysis, createAccount, postAccountEntry } from '../src/domain/accounts.js'
 import { issueApproval } from '../src/domain/approvals.js'
+import { updateSettings } from '../src/domain/settings.js'
+import { getZReport } from '../src/domain/zreport.js'
 import { createItem, getItem } from '../src/domain/items.js'
 import { dailySales, itemGp, salesSummary, shopToday } from '../src/domain/sales.js'
 import { postMovements } from '../src/domain/stock.js'
@@ -354,6 +356,59 @@ describe('till sync', () => {
     expect(res[1].error).toMatch(/already has run/)
     await t.as((tx) => closeRun(tx, first, { counted: { cash: 0, card: 0, cheque: 0 }, floatKept: 0 }))
     expect((await t.as((tx) => applyTillOps(tx, till5, [open(second)], t.userId))).map((r) => r.status)).toEqual(['recorded'])
+  })
+
+  it('refuses change above the shop\'s limit, which catches a mistyped amount', async () => {
+    const i = await item('CAP-1')
+    const run = await newRun()
+    const line = [{ itemId: i.id, qtyUnits: 10, listTotal: 34.2, lineTotal: 34.2 }]
+    await t.as((tx) => updateSettings(tx, { maxChange: 500 }))
+    // P1000 handed over for P34.20 is P965.80 of change: refused. P534.20 is exactly P500 of change: fine.
+    await expect(t.as((tx) => recordSale(tx, sale(run, line, [{ tender: 'cash', amount: 34.2 }], { cashTendered: 1000 })))).rejects.toThrow(/more than the P500\.00 limit/)
+    await t.as((tx) => recordSale(tx, sale(run, line, [{ tender: 'cash', amount: 34.2 }], { cashTendered: 534.2 })))
+    // With the limit switched off (0) any change is allowed.
+    await t.as((tx) => updateSettings(tx, { maxChange: 0 }))
+    await t.as((tx) => recordSale(tx, sale(run, line, [{ tender: 'cash', amount: 34.2 }], { cashTendered: 1000 })))
+    await t.as((tx) => updateSettings(tx, { maxChange: 500 }))
+  })
+
+  it('counts the cash in notes and coins, makes a numbered Z-report, and locks the run', async () => {
+    const i = await item('Z-1')
+    const run = await newRun(100)
+    await t.as((tx) => recordSale(tx, sale(run, [{ itemId: i.id, qtyUnits: 20, listTotal: 68.4, lineTotal: 68.4 }], [{ tender: 'cash', amount: 68.4 }], { cashTendered: 100 })))
+    expect(await t.as((tx) => getZReport(tx, run))).toBeNull()                       // nothing until it is cashed up
+
+    // The notes and coins have to add up to the cash counted, in whole numbers.
+    const input = (cash: number, breakdown: Record<string, unknown>) => ({ counted: { cash, card: 0, cheque: 0 }, floatKept: 100, breakdown })
+    await expect(t.as((tx) => closeRun(tx, run, input(168.4, { '100': 1, '50': 1 })))).rejects.toThrow(/add up to P150\.00/)
+    await expect(t.as((tx) => closeRun(tx, run, input(168.4, { '100': 1.5 })))).rejects.toThrow(/whole number/)
+    await expect(t.as((tx) => closeRun(tx, run, input(168.4, { '3': 1 })))).rejects.toThrow(/unknown note or coin/)
+
+    // P100 + P50 + P10 + P5 + P2 + P1 + 25t + 10t + 5t = P168.40. Nothing was saved by the refused tries.
+    const counted = { '100': 1, '50': 1, '10': 1, '5': 1, '2': 1, '1': 1, '0.25': 1, '0.1': 1, '0.05': 1 }
+    const closed = await t.as((tx) => closeRun(tx, run, input(168.4, counted), t.userId))
+    expect(closed.surplus).toBe(0)
+    const z = (await t.as((tx) => getZReport(tx, run)))!
+    expect(z).toMatchObject({
+      runNo: closed.runNo, shiftId: run, openingFloat: 100, totalVariance: 0, cashBreakdown: counted,
+      sales: { count: 1, total: 68.4 }, cashiers: [{ code: 'ZZ', sales: 1, total: 68.4 }],
+    })
+    expect(z.counts.find((x) => x.tender === 'cash')).toMatchObject({ expected: 168.4, counted: 168.4, variance: 0 })
+
+    // Z-reports are numbered one after another, and a record that is never changed.
+    const run2 = await newRun(0)
+    const z2 = await t.as(async (tx) => { await closeRun(tx, run2, { counted: { cash: 0, card: 0, cheque: 0 }, floatKept: 0 }); return (await getZReport(tx, run2))! })
+    expect(z2.zNo).toBe(z.zNo + 1)
+    await expect(t.as((tx) => tx`update z_reports set z_no = 99 where till_run_id = ${run}`)).rejects.toThrow(/never changed/)
+    await expect(t.as((tx) => tx`delete from z_reports where till_run_id = ${run}`)).rejects.toThrow(/never changed/)
+    // The run is locked once cashed up.
+    await expect(t.as((tx) => tx`update till_runs set opening_float = 5 where id = ${run}`)).rejects.toThrow(/locked/)
+    await expect(t.as((tx) => tx`update till_runs set status = 'open' where id = ${run}`)).rejects.toThrow(/locked/)
+    // The variance is logged by the system: a short drawer is a high-priority line in the audit log.
+    const run3 = await newRun(50)
+    await t.as((tx) => closeRun(tx, run3, { counted: { cash: 45, card: 0, cheque: 0 }, floatKept: 0 }, t.userId))
+    const [log] = await t.as((tx) => tx`select detail from audit_log where action = 'cash_up' and entity_id = ${run3}`)
+    expect(log.detail).toMatchObject({ variance: { cash: -5 }, totalVariance: -5, priority: 'high' })
   })
 
   it('cannot see another pharmacy\'s sales', async () => {

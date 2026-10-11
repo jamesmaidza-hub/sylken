@@ -7,6 +7,7 @@ import { getSettings } from './settings.js'
 import { postMovements } from './stock.js'
 import { consumeApprovals } from './approvals.js'
 import { staffByCode } from './users.js'
+import { cleanBreakdown, createZReport } from './zreport.js'
 
 /**
  * The till: runs (drawer sessions), sales with split tenders, petty cash and account payments.
@@ -181,6 +182,13 @@ export async function recordSale(tx: Tx, s: SaleInput, opts: { userId?: string |
     cashTendered = round2(s.cashTendered ?? cashPaid)
     if (cents(cashTendered) < cents(cashPaid)) throw new DomainError('cash tendered is less than the cash paid')
     change = round2(cashTendered - cashPaid)
+    // A cap on change stops a mistyped amount (P1000 for P100) being given out of the drawer.
+    if (change > 0) {
+      const { maxChange } = await getSettings(tx)
+      if (maxChange > 0 && cents(change) > cents(maxChange)) {
+        throw new DomainError(`change of P${change.toFixed(2)} is more than the P${maxChange.toFixed(2)} limit; check the amount entered`, 'change_too_big', 409)
+      }
+    }
   }
 
   const [run] = await tx`select id, status from till_runs where id = ${s.runId}`
@@ -453,9 +461,14 @@ export interface CashUpInput {
   counted: Record<CountedTender, number>
   floatKept: number
   note?: string | null
+  /** The count of notes and coins ({ "200": 1, "0.5": 4 }). When given, it has to add up to the cash counted. */
+  breakdown?: Record<string, unknown> | null
 }
 
-/** Cash up a run: store what was counted against what the system expected, and close it. */
+/**
+ * Cash up a run: store what was counted against what the system expected (the variance is worked out here, not typed),
+ * log it, make the Z-report and lock the run. Variance = counted - (opening float + net cash takings - petty cash - cash drops).
+ */
 export async function closeRun(tx: Tx, runId: string, input: CashUpInput, userId?: string) {
   const [r] = await tx`select status from till_runs where id = ${runId} for update`
   if (!r) throw new DomainError('unknown till run', 'not_found', 404)
@@ -465,6 +478,12 @@ export async function closeRun(tx: Tx, runId: string, input: CashUpInput, userId
   }
   if (!(input.floatKept >= 0)) throw new DomainError('float kept cannot be negative')
   if (cents(input.floatKept) > cents(input.counted.cash)) throw new DomainError('the float kept back cannot be more than the cash counted')
+  let breakdown: Record<string, number> | null = null
+  if (input.breakdown) {
+    const cb = cleanBreakdown(input.breakdown)
+    if (cents(cb.total) !== cents(input.counted.cash)) throw new DomainError(`the notes and coins add up to P${cb.total.toFixed(2)}, not the P${round2(input.counted.cash).toFixed(2)} of cash counted`)
+    breakdown = cb.breakdown
+  }
   const sum = (await runSummary(tx, runId))!
   for (const t of countedTenders) {
     await tx`
@@ -473,10 +492,22 @@ export async function closeRun(tx: Tx, runId: string, input: CashUpInput, userId
   }
   await tx`
     update till_runs set status = 'closed', closed_at = now(), closed_by = ${userId ?? null},
-           float_kept = ${round2(input.floatKept)}, note = ${input.note?.trim() || null}
+           float_kept = ${round2(input.floatKept)}, note = ${input.note?.trim() || null},
+           cash_breakdown = ${breakdown ? tx.json(breakdown as any) : null}
      where id = ${runId}`
-  await audit(tx, userId, 'cash_up', 'till_run', runId, { counted: input.counted, floatKept: input.floatKept })
-  return (await runSummary(tx, runId))!
+  const closed = (await runSummary(tx, runId))!
+  const variance = Object.fromEntries(closed.counts.map((c) => [c.tender, round2(c.counted - c.expected)]))
+  const totalVariance = round2(Object.values(variance).reduce((a, v) => a + v, 0))
+  await audit(tx, userId, 'cash_up', 'till_run', runId, {
+    counted: input.counted, floatKept: input.floatKept, variance, totalVariance, ...(totalVariance !== 0 ? { priority: 'high' } : {}),
+  })
+  const cashiers = (await tx`
+    select cashier_code, count(*)::int as n, coalesce(sum(total), 0) as total from sales where till_run_id = ${runId} group by cashier_code order by cashier_code`)
+    .map((x) => ({ code: x.cashier_code as string | null, sales: x.n as number, total: round2(num(x.total)) }))
+  const [shop] = await tx`select name from tenants where id = current_setting('app.tenant_id')::uuid`
+  const { vatNumber } = await getSettings(tx)
+  await createZReport(tx, closed, { cashBreakdown: breakdown, cashiers, shopName: shop.name as string, vatNumber }, userId)
+  return closed
 }
 
 // ---------------------------------------------------------------- sync from a till

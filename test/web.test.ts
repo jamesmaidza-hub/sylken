@@ -185,8 +185,16 @@ describe('web', () => {
     expect(slip).toContain('TAX INVOICE · COPY')
     expect(slip).toContain('PANADO 24')
     expect(await (await get(`/cashup/runs/${runId}`)).text()).toContain('Cash up this run')
-    const closed = await post(`/cashup/runs/${runId}/close`, { cash: '117.10', card: '0', cheque: '0', floatKept: '100', note: '' })
-    expect(new URL(closed.headers.get('location')!, 'http://x').searchParams.get('ok')).toMatch(/balances/)
+    // The cash is counted in notes and coins: P100 + P10 + P5 + P2 + 10t = P117.10.
+    const closed = await post(`/cashup/runs/${runId}/close`, { d_100: '1', d_10: '1', d_5: '1', d_2: '1', 'd_0.1': '1', card: '0', cheque: '0', floatKept: '100', note: '' })
+    const closedTo = new URL(closed.headers.get('location')!, 'http://x')
+    expect(closedTo.searchParams.get('ok')).toMatch(/balances/)
+    expect(closedTo.pathname).toBe(`/cashup/runs/${runId}/z`)                 // cashing up lands on the Z-report
+    const zPage = await (await get(`/cashup/runs/${runId}/z`)).text()
+    expect(zPage).toContain('Z-report 1')
+    expect(zPage).toContain('Notes and coins counted')
+    const zJson = await (await get(`/cashup/runs/${runId}/z?format=json`)).json() as any
+    expect(zJson).toMatchObject({ zNo: 1, runNo: expect.any(Number), totalVariance: 0, cashBreakdown: { '100': 1, '10': 1, '5': 1, '2': 1, '0.1': 1 } })
     const after = await send()
     expect(after.runs[runId].status).toBe('closed')
     expect(await (await get('/cashup/problems')).text()).toContain('not-a-uuid')
