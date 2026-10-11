@@ -85,11 +85,25 @@
     return `<span class="stock">${t} in stock</span>`
   }
 
+  /** The name behind the code typed in the header box, so the cashier sees at once that it was read right. */
+  function showCashier() {
+    const code = String($('cashier-code').value || '').trim().toUpperCase()
+    const who = (cat && cat.staff || []).find((s) => s.c === code)
+    $('cashier').textContent = who ? who.n : code.length === 2 ? 'unknown code' : ''
+    $('cashier').className = who ? '' : 'muted'
+    if (who && /cashier code|staff code/.test($('banner').textContent)) banner('')    // the "type your code" message has done its job
+  }
+  $('cashier-code').addEventListener('input', (e) => {
+    e.target.value = e.target.value.replace(/[^A-Za-z]/g, '').toUpperCase().slice(0, 2)
+    showCashier()
+  })
+  $('cashier-code').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); $('scan').focus() } })
+
   function header() {
     const t = cat && cat.tills.find((x) => x.id === tillId)
     $('till-label').textContent = t ? `${t.name} (${t.code})` : 'No till chosen'
     $('run-label').textContent = run ? (run.runNo ? `Run ${run.runNo}` : 'Run (not sent yet)') : 'No run open'
-    $('cashier').textContent = user.name
+    showCashier()
     const net = $('net')
     net.textContent = online ? 'Online' : 'Offline: sales are kept on this till'
     net.className = 'net ' + (online ? 'on' : 'off')
@@ -184,7 +198,23 @@
 
   // ------------------------------------------------------------ ringing up
 
+  /** The staff member whose code is typed in the header box, or null. */
+  const cashierNow = () => {
+    const code = String($('cashier-code').value || '').trim().toUpperCase()
+    return (cat && cat.staff || []).find((s) => s.c === code) || null
+  }
+  /** Nothing goes on a sale until the cashier has typed a valid code. */
+  function needCode() {
+    if (cashierNow()) return false
+    const typed = String($('cashier-code').value || '').trim().toUpperCase()
+    banner(!cat || !(cat.staff || []).length ? 'No staff codes are set up yet. A manager gives each person a 2-letter code under Users; then reload the till.'
+      : typed ? `${esc(typed)} is not a staff code. Type your 2-letter cashier code first.` : 'Type your 2-letter cashier code in the box at the top before you start the sale.', true)
+    $('cashier-code').focus(); $('cashier-code').select()
+    return true
+  }
+
   function addItem(it, packs = 1, units = null) {
+    if (needCode()) return
     const n = it.n || 1
     const sign = cart.kind === 'refund' ? -1 : 1
     const u = sign * (units ?? Math.round(packs * n))
@@ -230,6 +260,7 @@
     const input = $('scan')
     const { packs, units, q } = parseScan(input.value)
     if (!q) { if (cart.lines.length) pay(); return }
+    if (needCode()) return                  // nothing is entered until the cashier's code is in
     let it = byCode.get(q.toUpperCase())
     if (!it && results.length) it = results[resultSel]
     if (!it) { banner(`Nothing matches "${esc(q)}".`, true); input.select(); return }
@@ -309,6 +340,7 @@
 
   /** Bring a dispensed script onto the sale by its number. The stock left at dispensing, so these lines take none. */
   async function addScript() {
+    if (needCode()) return
     if (cart.script) { banner('One script per sale. Finish this sale first.', true); return }
     if (!(await ensureRun())) return
     const v = await ask(`<h2>${cart.kind === 'refund' ? 'Refund a script' : 'Pay for a script'}</h2>
@@ -349,6 +381,10 @@
   async function pay() {
     if (!cart.lines.length) return
     if (!(await ensureRun())) return
+    // Every sale is rung under a cashier's 2-letter code, typed in the header box before anything is entered.
+    if (needCode()) return
+    const cashier = cashierNow()
+    banner('')
     const { total } = totals()
     const refund = cart.kind === 'refund'
     const due = Math.abs(total)
@@ -461,7 +497,7 @@
     const cashPaid = round2(payments.filter((p) => p.tender === 'cash').reduce((a, p) => a + p.amount, 0))
     const change = refund ? 0 : round2(cashTendered - cashPaid)
     const sale = {
-      id: uuid(), runId: run.id, kind: cart.kind, refundOf: cart.refundOf, occurredAt: new Date().toISOString(),
+      id: uuid(), runId: run.id, kind: cart.kind, refundOf: cart.refundOf, occurredAt: new Date().toISOString(), cashierCode: cashier.c,
       accountId, medicalAid, memberNo, cashTendered: cashPaid > 0 && !refund ? cashTendered : null, rounding: round2(sign * rounding),
       scriptId: cart.script ? cart.script.id : null,
       lines: cart.lines.map((l) => ({ itemId: l.i, qtyUnits: l.units, listTotal: l.listTotal, lineTotal: l.lineTotal, scriptLineId: l.sl || null })),
@@ -472,7 +508,7 @@
     save('slipNo', slipNo)
     const onAccount = round2(payments.filter((p) => p.tender === 'account').reduce((a, p) => a + p.amount, 0))
     if (accountId && onAccount) noteAccountMove(sale.id, accountId, sign * onAccount)
-    lastSlip = { sale, slipNo, lines: cart.lines.map((l) => ({ d: l.d, units: l.units, n: l.n, lineTotal: l.lineTotal, v: l.v, vat: l.vat })), change, cashier: user.name, at: sale.occurredAt,
+    lastSlip = { sale, slipNo, lines: cart.lines.map((l) => ({ d: l.d, units: l.units, n: l.n, lineTotal: l.lineTotal, v: l.v, vat: l.vat })), change, cashier: `${cashier.n} (${cashier.c})`, at: sale.occurredAt,
       script: cart.script ? { no: cart.script.scriptNo, patient: cart.script.patientName } : null }
     save('lastSlip', lastSlip)
     const last = $('last')
@@ -483,7 +519,10 @@
       : change > 0 ? `<span>Give change</span><b>${money(change)}</b><small>${money(cashTendered)} cash for ${money(settled)}</small>`
       : `<span>Paid</span><b>${money(settled)}</b><small>${payments.map((p) => tenderNames[p.tender]).join(' + ')}</small>`
     for (const l of cart.lines) { const it = !l.sl && cat.items.find((x) => x.i === l.i); if (it && it.s !== undefined) it.s -= l.units }
+    $('cashier-code').value = ''          // the next sale needs its own code
+    showCashier()
     $('scan').value = ''
+    setTimeout(() => $('cashier-code').focus(), 0)
     results = []
     showResults()
     cart = newCart()
@@ -722,6 +761,7 @@
     if (modalDone) { if (e.key === 'Escape') { e.preventDefault(); modalDone(null) } return }
     const scan = $('scan')
     const inScan = e.target === scan
+    const inCode = e.target === $('cashier-code')
     const k = e.key
     const fkeys = { F2: addScript, F4: changeQty, F5: pay, F6: changePrice, F8: toggleRefund, F9: pettyCash, F10: accountPayment, F12: printSlip }
     if (fkeys[k]) { e.preventDefault(); fkeys[k](); return }
@@ -731,6 +771,7 @@
       clearSale()
       return
     }
+    if (inCode) return                      // typing the cashier code: leave every other key alone
     if (inScan && results.length && (k === 'ArrowDown' || k === 'ArrowUp')) {
       e.preventDefault()
       resultSel = Math.max(0, Math.min(results.length - 1, resultSel + (k === 'ArrowDown' ? 1 : -1)))
@@ -772,6 +813,7 @@
 
   index()
   setTouch(touch)
+  $('cashier-code').focus()               // every sale starts with the cashier's code
   render()
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/till/sw.js', { scope: '/till/' }).catch(() => {})
   ;(async () => {

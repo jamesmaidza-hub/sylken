@@ -39,7 +39,7 @@ const newRun = async (float = 200) => {
 }
 
 const sale = (runId: string, lines: SaleInput['lines'], payments: SaleInput['payments'], extra: Partial<SaleInput> = {}): SaleInput => ({
-  id: randomUUID(), runId, kind: 'sale', occurredAt: new Date(), lines, payments, ...extra,
+  id: randomUUID(), runId, kind: 'sale', occurredAt: new Date(), lines, payments, cashierCode: 'ZZ', ...extra,
 })
 
 describe('till pricing', () => {

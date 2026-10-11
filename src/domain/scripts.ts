@@ -41,6 +41,8 @@ export interface ScriptHeaderInput {
   rxDate: string
   billMedicalAid?: boolean
   note?: string | null
+  /** The 2-letter staff code of the dispenser who started the script (the screens always ask for it). */
+  initiatedCode?: string | null
 }
 
 async function checkHeader(tx: Tx, h: ScriptHeaderInput, settings: Settings) {
@@ -61,9 +63,9 @@ export async function createDraft(tx: Tx, h: ScriptHeaderInput, userId?: string)
   if (!patient.active) throw new DomainError('this patient is marked inactive')
   await checkHeader(tx, h, settings)
   const [s] = await tx`
-    insert into scripts (tenant_id, patient_id, doctor_id, rx_date, bill_medical_aid, note, created_by)
+    insert into scripts (tenant_id, patient_id, doctor_id, rx_date, bill_medical_aid, note, created_by, initiated_code)
     values (${await tenantId(tx)}, ${h.patientId}, ${h.doctorId || patient.doctorId || null}, ${h.rxDate}, ${h.billMedicalAid ?? true},
-            ${h.note?.trim() || null}, ${userId ?? null})
+            ${h.note?.trim() || null}, ${userId ?? null}, ${h.initiatedCode?.trim().toUpperCase() || null})
     returning id`
   return s.id as string
 }
@@ -209,6 +211,7 @@ export interface Script {
   patientTotal: number
   note: string | null
   createdBy: string | null
+  initiatedCode: string | null
   createdAt: Date
   dispensedBy: string | null
   dispensedAt: Date | null
@@ -280,7 +283,7 @@ export async function getScript(tx: Tx, id: string): Promise<Script | null> {
     memberNo: s.status === 'draft' ? (billAid ? patient.memberNo : null) : s.member_no,
     dependantCode: s.status === 'draft' ? (billAid ? patient.dependantCode : null) : s.dependant_code,
     total: num(s.total), vat: num(s.vat), cost: num(s.cost), fees: num(s.fees), ...split,
-    note: s.note, createdBy: s.created_by_name, createdAt: s.created_at, dispensedBy: s.dispensed_by_name, dispensedAt: s.dispensed_at,
+    note: s.note, createdBy: s.created_by_name, initiatedCode: s.initiated_code ?? null, createdAt: s.created_at, dispensedBy: s.dispensed_by_name, dispensedAt: s.dispensed_at,
     reversedBy: s.reversed_by_name, reversedAt: s.reversed_at, reverseReason: s.reverse_reason,
     lines: shaped,
     sales: sales.map((x) => ({ id: x.id, saleNo: x.sale_no, kind: x.kind, total: num(x.total), occurredAt: x.occurred_at })),
@@ -424,13 +427,44 @@ export async function reverseScript(tx: Tx, scriptId: string, reason: string, us
   await audit(tx, userId, 'reverse', 'script', scriptId, { scriptNo: row.script_no, reason: reason.trim() })
 }
 
+/**
+ * Amend a dispensed script. A dispensed script is a legal record that can't be edited, so this reverses it
+ * (it stays on file, marked reversed with "Amended: ..." and its stock comes back) and opens a new draft
+ * holding the same patient, doctor, date and lines, ready to correct and dispense. The new script gets its
+ * own number when it is dispensed. The same limits as a reversal apply: not once it was paid at the till,
+ * and not after repeats have been dispensed from it. A repeat can't be amended: reverse it and give it again.
+ */
+export async function amendScript(tx: Tx, scriptId: string, reason: string, userId?: string, initiatedCode?: string | null): Promise<string> {
+  if (!reason.trim()) throw new DomainError('say what is being amended')
+  const orig = await getScript(tx, scriptId)
+  if (!orig) throw new DomainError('unknown script', 'not_found', 404)
+  if (orig.status !== 'dispensed') throw new DomainError('only a dispensed script can be amended')
+  if (orig.repeatOf) throw new DomainError('a repeat cannot be amended; reverse it and give the repeat again')
+  await reverseScript(tx, scriptId, `Amended: ${reason.trim()}`, userId)
+  const tid = await tenantId(tx)
+  const note = `Amended from script ${orig.scriptNo}${orig.note ? `: ${orig.note}` : ''}`
+  const [s] = await tx`
+    insert into scripts (tenant_id, patient_id, doctor_id, rx_date, bill_medical_aid, note, created_by, initiated_code)
+    values (${tid}, ${orig.patient.id}, ${orig.doctorId}, ${orig.rxDate}, ${orig.billMedicalAid}, ${note}, ${userId ?? null},
+            ${initiatedCode?.trim().toUpperCase() || null})
+    returning id`
+  for (const [n, l] of orig.lines.entries()) {
+    await tx`
+      insert into script_lines (tenant_id, script_id, line_no, item_id, qty_units, supply_units, directions, supply_days, repeats, icd10, no_claim)
+      values (${tid}, ${s.id}, ${n + 1}, ${l.itemId}, ${l.qtyUnits}, ${l.supplyUnits}, ${l.directions}, ${l.supplyDays}, ${l.repeats}, ${l.icd10}, ${l.noClaim})`
+  }
+  await reprice(tx, s.id)
+  await audit(tx, userId, 'amend', 'script', scriptId, { scriptNo: orig.scriptNo, reason: reason.trim(), newScriptId: s.id })
+  return s.id as string
+}
+
 // ---------------------------------------------------------------- repeats
 
 /**
  * Start the next repeat of a script as a draft holding the lines that still have repeats
  * left. Repeats are always counted against the original script.
  */
-export async function startRepeat(tx: Tx, scriptId: string, userId?: string): Promise<string> {
+export async function startRepeat(tx: Tx, scriptId: string, userId?: string, initiatedCode?: string | null): Promise<string> {
   const [given] = await tx`select id, repeat_of from scripts where id = ${scriptId}`
   if (!given) throw new DomainError('unknown script', 'not_found', 404)
   const originalId = given.repeat_of ?? given.id
@@ -445,8 +479,9 @@ export async function startRepeat(tx: Tx, scriptId: string, userId?: string): Pr
   if (!lines.length) throw new DomainError(`script ${orig.scriptNo} has no repeats left`, 'no_repeats', 409)
   const tid = await tenantId(tx)
   const [s] = await tx`
-    insert into scripts (tenant_id, patient_id, doctor_id, rx_date, repeat_of, bill_medical_aid, created_by)
-    values (${tid}, ${orig.patient.id}, ${orig.doctorId}, ${orig.rxDate}, ${originalId}, ${orig.billMedicalAid}, ${userId ?? null})
+    insert into scripts (tenant_id, patient_id, doctor_id, rx_date, repeat_of, bill_medical_aid, created_by, initiated_code)
+    values (${tid}, ${orig.patient.id}, ${orig.doctorId}, ${orig.rxDate}, ${originalId}, ${orig.billMedicalAid}, ${userId ?? null},
+            ${initiatedCode?.trim().toUpperCase() || null})
     returning id`
   for (const [n, l] of lines.entries()) {
     await tx`

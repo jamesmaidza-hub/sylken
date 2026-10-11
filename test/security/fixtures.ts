@@ -21,6 +21,7 @@ export async function pharmacy(db: Sql) {
   }
   const staff = {
     assistant: await person(['assistant'], 'Assistant'),
+    supervisor: await person(['supervisor'], 'Supervisor'),
     dispenser: await person(['dispenser'], 'Dispenser'),
     pharmacist: await person(['pharmacist'], 'Pharmacist'),
     pharmacist2: await person(['pharmacist'], 'Second pharmacist'),

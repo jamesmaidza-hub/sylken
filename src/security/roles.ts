@@ -5,18 +5,20 @@
  * any of them grants. Anything not granted here is refused.
  */
 
-export const roles = ['assistant', 'dispenser', 'pharmacist', 'manager'] as const
+export const roles = ['assistant', 'supervisor', 'dispenser', 'pharmacist', 'manager'] as const
 export type Role = (typeof roles)[number]
 
+/** "assistant" is the stored name of the cashier role. */
 export const roleLabels: Record<Role, string> = {
-  assistant: 'Counter assistant',
+  assistant: 'Cashier',
+  supervisor: 'Supervisor',
   dispenser: 'Dispenser',
   pharmacist: 'Pharmacist',
   manager: 'Manager',
 }
 
 /** Roles that must use a second PIN at every login. */
-export const secondFactorRoles: readonly Role[] = ['pharmacist', 'manager']
+export const secondFactorRoles: readonly Role[] = ['supervisor', 'pharmacist', 'manager']
 
 export const permissions = {
   'home.view': 'See the home page',
@@ -51,6 +53,7 @@ const everyone: Permission[] = ['home.view', 'items.view', 'till.use', 'cashup.o
 
 export const rolePermissions: Record<Role, readonly Permission[]> = {
   assistant: everyone,
+  supervisor: [...everyone, 'items.edit', 'stock.receive', 'stock.adjust', 'stock.reports', 'cashup.manage', 'sales.view'],
   dispenser: [...everyone, 'stock.receive', 'rx.view', 'rx.capture', 'rx.dispense'],
   pharmacist: [...everyone, 'items.edit', 'stock.receive', 'stock.reports', 'accounts.manage', 'sales.view',
     'rx.view', 'rx.capture', 'rx.dispense', 'rx.override', 'rx.check', 'rx.reverse', 'rx.flags.remove', 'rx.reports', 'rx.settings'],

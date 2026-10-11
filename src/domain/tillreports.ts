@@ -115,7 +115,7 @@ export async function debtors(tx: Tx, asOf: string) {
 export async function salesJournal(tx: Tx, range: DayRange, opts: { userId?: string } = {}) {
   const b = await bounds(tx, range)
   const rows = await tx`
-    select s.id, s.sale_no, s.kind, s.occurred_at, s.total, s.vat, s.cost, s.rounding, s.late, r.run_no, t.code as till_code, u.name as user_name,
+    select s.id, s.sale_no, s.kind, s.occurred_at, s.total, s.vat, s.cost, s.rounding, s.late, r.run_no, t.code as till_code, u.name as user_name, s.cashier_code,
            a.account_no, a.name as account_name, s.medical_aid, s.member_no, sc.script_no,
            (select string_agg(case p.tender when 'medical_aid' then 'medical aid' else p.tender end || ' ' || to_char(p.amount, 'FM999999990.00'), ', ' order by p.line_no)
               from sale_payments p where p.sale_id = s.id) as tenders,
@@ -130,7 +130,7 @@ export async function salesJournal(tx: Tx, range: DayRange, opts: { userId?: str
     const total = num(s.total), excl = round2(total - num(s.vat)), cost = round2(num(s.cost))
     return {
       id: s.id as string, saleNo: s.sale_no as number, kind: s.kind as string, at: s.occurred_at as Date, till: `${s.till_code} run ${s.run_no}`,
-      assistant: s.user_name as string | null, account: s.account_no ? `${s.account_no} ${s.account_name}` : null,
+      assistant: s.cashier_code ? `${s.user_name ?? ''} (${s.cashier_code})`.trim() : (s.user_name as string | null), account: s.account_no ? `${s.account_no} ${s.account_name}` : null,
       medicalAid: s.medical_aid ? `${s.medical_aid}${s.member_no ? ' ' + s.member_no : ''}` : null, scriptNo: s.script_no as number | null,
       lines: Number(s.lines), tenders: (s.tenders as string | null) ?? '', discount: round2(num(s.discount)), total, vat: num(s.vat), rounding: num(s.rounding),
       excl, cost, ...gpOf(excl, cost), late: s.late as boolean,

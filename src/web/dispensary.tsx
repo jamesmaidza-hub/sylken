@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import { raw } from 'hono/html'
 import { listAccounts } from '../domain/accounts.js'
 import { DomainError } from '../domain/errors.js'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
+import { staffByCode } from '../domain/users.js'
 import { findByCode, searchItems } from '../domain/items.js'
 import {
   addFlag, ageOn, createPatient, familyOf, getDoctor, getPatient, listDirections, listDoctors, listMedicalAids, patientFlags, removeFlag,
@@ -10,7 +12,7 @@ import {
 import { bounds } from '../domain/sales.js'
 import {
   addDays, addLine, cancelOwed, createDraft, discardDraft, dispenseScript, draftScripts, getScript, initials, labelsFor, listOwed, patientScripts,
-  register, removeLine, reverseScript, scriptBook, scriptIdByNo, scriptWarnings, setSupply, startRepeat, supplyOwed, updateDraft, type Label,
+  register, removeLine, amendScript, reverseScript, scriptBook, scriptIdByNo, scriptWarnings, setSupply, startRepeat, supplyOwed, updateDraft, type Label,
 } from '../domain/scripts.js'
 import { getSettings, getShop, nextScriptNo, setNextScriptNo, updateSettings, updateShop } from '../domain/settings.js'
 import { checkScript, scriptCheck } from '../domain/checks.js'
@@ -26,6 +28,13 @@ import { download, formatHref, type Col } from './export.js'
  */
 
 const str = (v: unknown) => String(v ?? '').trim()
+
+/** The dispenser code typed to start a script; it must belong to an active login that may capture scripts. */
+async function dispenserCode(tx: Parameters<typeof staffByCode>[0], v: unknown): Promise<string> {
+  const who = await staffByCode(tx, v, 'rx.capture')
+  if (!who) throw new DomainError(`${str(v).toUpperCase() || 'No code'} is not a dispenser code. Type the 2-letter code of a dispenser or pharmacist.`)
+  return who.code
+}
 const intOrNull = (v: unknown) => (str(v) === '' ? null : Number(str(v)))
 
 // Suggests items as the name is typed; the field still accepts a scanned barcode or a stock code.
@@ -325,8 +334,63 @@ function PatientForm(props: { action: string; p?: Patient | null; mainMember?: P
 
 const statusChip = (s: string) => <span class={s === 'dispensed' ? 'st-active' : s === 'reversed' ? 'st-quarantined' : 'st-dormant'}>{s}</span>
 
+/** The dispenser's 2-letter code, kept in a cookie while they work; it is checked against the staff list on every request. */
+const RX_COOKIE = 'rx_code'
+/** The id of the script just dispensed: its page and labels stay open for a few minutes after the code is cleared. */
+const RX_DONE_COOKIE = 'rx_done'
+const rxCookieOptions = { path: '/', httpOnly: true, sameSite: 'Strict' as const, secure: process.env.NODE_ENV === 'production' }
+/** Pages that open without a dispenser code: the code screen itself and the shop's dispensary settings. */
+const openWithoutCode = (path: string) => path === '/dispensary/code' || path === '/dispensary/code/clear' || path.startsWith('/dispensary/settings')
+
+/** Only ever send people back to a dispensary page. */
+const safeNext = (v: unknown) => { const s = String(v ?? ''); return s.startsWith('/dispensary') && !s.startsWith('//') ? s : '/dispensary' }
+
+function CodeGate(props: { next: string }) {
+  return (
+    <>
+      <h1>Dispenser code</h1>
+      <form method="post" action="/dispensary/code" class="panel row">
+        <input type="hidden" name="next" value={props.next} />
+        <label>Your 2-letter dispenser code<input name="code" required minlength={2} maxlength={2} pattern="[A-Za-z]{2}" autocomplete="off" autocapitalize="characters" autofocus
+          style="text-transform:uppercase;width:90px;font-size:18px;font-weight:700;text-align:center" /></label>
+        <button>Open the dispensary</button>
+      </form>
+      <p class="hint">Every script is started under a dispenser's code. Type yours before anything else; the code is cleared when a script is dispensed, when you press Change dispenser, or when the browser is closed.</p>
+    </>
+  )
+}
+
 export function dispensaryRoutes() {
   const r = new Hono<Env>()
+
+  // ------------------------------------------------------------ the dispenser code comes first
+
+  r.use('*', async (c, next) => {
+    if (openWithoutCode(c.req.path)) return next()
+    const done = getCookie(c, RX_DONE_COOKIE)
+    if (done && c.req.method === 'GET' && (c.req.path === `/dispensary/scripts/${done}` || c.req.path.startsWith(`/dispensary/scripts/${done}/labels`))) return next()
+    const code = getCookie(c, RX_COOKIE)
+    const who = code ? await run(c, (tx) => staffByCode(tx, code, 'rx.capture')) : null
+    if (who) return next()
+    if (code) deleteCookie(c, RX_COOKIE, { path: '/' })     // a code that no longer works
+    if (c.req.method === 'GET') return page(c, 'Dispenser code', <CodeGate next={safeNext(new URL(c.req.url).pathname + new URL(c.req.url).search)} />)
+    return back(c, '/dispensary', { err: 'Type your dispenser code first.' })
+  })
+
+  r.post('/code', async (c) => {
+    const b = await c.req.parseBody()
+    const to = new URL(safeNext(b.next), 'http://x')
+    for (const k of ['ok', 'err']) to.searchParams.delete(k)
+    const who = await run(c, (tx) => staffByCode(tx, b.code, 'rx.capture'))
+    if (!who) return back(c, `${to.pathname}${to.search}`, { err: `${str(b.code).toUpperCase() || 'No code'} is not a dispenser code. Type the 2-letter code of a dispenser or pharmacist.` })
+    setCookie(c, RX_COOKIE, who.code, rxCookieOptions)
+    return c.redirect(`${to.pathname}${to.search}`)
+  })
+
+  r.post('/code/clear', (c) => {
+    deleteCookie(c, RX_COOKIE, { path: '/' })
+    return c.redirect('/dispensary')
+  })
 
   // ------------------------------------------------------------ home: find a patient
 
@@ -341,7 +405,8 @@ export function dispensaryRoutes() {
     return page(c, 'Dispensary', (
       <>
         <RxToolbar on="find" />
-        <div class="row"><h1>Dispensary</h1><span class="spacer" />{owed.length > 0 && <a href="/dispensary/owed">{owed.length} owed item{owed.length === 1 ? '' : 's'} waiting</a>}</div>
+        <div class="row"><h1>Dispensary</h1><span class="spacer" />{owed.length > 0 && <a href="/dispensary/owed">{owed.length} owed item{owed.length === 1 ? '' : 's'} waiting</a>}
+          <form method="post" action="/dispensary/code/clear" class="row"><span class="muted">Dispenser <b>{getCookie(c, RX_COOKIE)}</b></span><button class="secondary">Change dispenser</button></form></div>
         <form class="row panel">
           <input name="q" data-search value={q} placeholder="Patient surname (and first name), ID, member number or phone  ( / )" style="flex:1" autofocus />
           <button>Find</button>
@@ -430,9 +495,9 @@ export function dispensaryRoutes() {
           <label>Doctor<select name="doctorId"><option value="">None on the script</option>{data.doctors.map((d) => <option value={d.id} selected={d.id === p.doctorId}>{d.name}{d.practiceNo ? ` (${d.practiceNo})` : ''}</option>)}</select></label>
           <label>Date on the script<input name="rxDate" type="date" value={today} max={today} required /></label>
           {p.medicalAidName && <label class="row" style="flex-direction:row"><input type="checkbox" name="private" /> Patient pays (don't bill {p.medicalAidName})</label>}
-          <div><button autofocus>Start script</button></div>
+          <div><button>Start script</button></div>
         </form>
-        <p class="hint">Press Enter to start a script with this doctor and today's date.</p>
+        <p class="hint">Press Enter to start a script with this doctor and today's date. It is started under your dispenser code.</p>
         <LabelLink id={c.req.query('label')} />
         {data.owed.length > 0 && <>
           <h2>Owed to this patient</h2>
@@ -500,8 +565,9 @@ export function dispensaryRoutes() {
 
   r.post('/patients/:id/scripts', async (c) => {
     const b = await c.req.parseBody()
-    const id = await run(c, (tx) => createDraft(tx, {
+    const id = await run(c, async (tx) => createDraft(tx, {
       patientId: c.req.param('id'), doctorId: str(b.doctorId) || null, rxDate: str(b.rxDate), billMedicalAid: b.private !== 'on',
+      initiatedCode: await dispenserCode(tx, getCookie(c, RX_COOKIE)),
     }, c.get('user').userId))
     return c.redirect(`/dispensary/scripts/${id}`)
   })
@@ -599,6 +665,7 @@ export function dispensaryRoutes() {
                   <div class="rx-row"><span class="rx-l">Doctor</span>{s.doctorName ? <span><b>{s.doctorName}</b>{s.doctorPracticeNo && <span class="muted"> ({s.doctorPracticeNo})</span>}</span> : <span class="muted">None on the script</span>}</div>
                   {s.repeatOf && <div class="rx-row"><span class="rx-l">Repeat</span><span>Repeat {s.repeatNo} of script {s.repeatOf.scriptNo}. Set what to give now in the lines below.</span></div>}
                 </>}
+            {s.initiatedCode && <div class="rx-row"><span class="rx-l">Started by</span><span><b>{s.initiatedCode}</b></span></div>}
             {draft && !s.repeatOf && <form method="post" action={`/dispensary/scripts/${s.id}/lines`} id="add-line">
               <div class="rx-row"><label class="rx-l" for="rx-item">Item</label>
                 <input id="rx-item" name="item" list="items-dl" data-items required autofocus autocomplete="off" placeholder="Scan, or type a code or name" class="grow" />
@@ -738,6 +805,15 @@ export function dispensaryRoutes() {
                 <button>I have checked this script</button></form>
             : <p class="muted">Not checked yet. A pharmacist other than the person who dispensed it checks it.</p>}
           {s.status === 'dispensed' && can(c, 'rx.reverse') && (
+            !s.repeatOf && <details><summary>Amend this script</summary>
+              <form method="post" action={`/dispensary/scripts/${s.id}/amend`} class="grid panel">
+                <label>What is wrong<input name="reason" required placeholder="e.g. quantity or directions need changing" /></label>
+                <div><button>Amend script {s.scriptNo}</button></div>
+              </form>
+              <p class="hint">A dispensed script can't be edited, so it is reversed (kept on file, its stock comes back) and a copy opens for you to correct and dispense under a new number. Not possible once it is paid at the till or has repeats dispensed. You can reprint its labels at any time with Print labels.</p>
+            </details>
+          )}
+          {s.status === 'dispensed' && can(c, 'rx.reverse') && (
             <details><summary>Reverse this script</summary>
               <form method="post" action={`/dispensary/scripts/${s.id}/reverse`} class="grid panel">
                 <label>Why<input name="reason" required placeholder="e.g. wrong strength captured" /></label>
@@ -802,6 +878,10 @@ export function dispensaryRoutes() {
     if (b.confirmed === 'on' || b.allowNegative === 'on') requirePermission(c, 'rx.override', 'Only a pharmacist can dispense past a warning.')
     const id = c.req.param('id')
     const { scriptNo } = await run(c, (tx) => dispenseScript(tx, id, { confirmed: b.confirmed === 'on', allowNegative: b.allowNegative === 'on' }, c.get('user').userId))
+    // The script is done, so the code is cleared: the next script starts with its own code. The script just dispensed
+    // (and its labels) stay open for a short while so the labels can be printed.
+    deleteCookie(c, RX_COOKIE, { path: '/' })
+    setCookie(c, RX_DONE_COOKIE, id, { ...rxCookieOptions, maxAge: 15 * 60 })
     return back(c, `/dispensary/scripts/${id}`, { ok: `Dispensed as script ${scriptNo}. Print the labels, then ring it up at the till.` })
   })
 
@@ -816,6 +896,13 @@ export function dispensaryRoutes() {
     return back(c, `/dispensary/patients/${pid}`, { ok: 'Script discarded' })
   })
 
+  r.post('/scripts/:id/amend', async (c) => {
+    const b = await c.req.parseBody()
+    const id = c.req.param('id')
+    const fresh = await run(c, async (tx) => amendScript(tx, id, str(b.reason), c.get('user').userId, await dispenserCode(tx, getCookie(c, RX_COOKIE))))
+    return back(c, `/dispensary/scripts/${fresh}`, { ok: 'The original script is reversed and kept on file. Change what is wrong on this copy, then dispense it.' })
+  })
+
   r.post('/scripts/:id/reverse', async (c) => {
     const b = await c.req.parseBody()
     await run(c, (tx) => reverseScript(tx, c.req.param('id'), str(b.reason), c.get('user').userId))
@@ -823,7 +910,7 @@ export function dispensaryRoutes() {
   })
 
   r.post('/scripts/:id/repeat', async (c) => {
-    const id = await run(c, (tx) => startRepeat(tx, c.req.param('id'), c.get('user').userId))
+    const id = await run(c, async (tx) => startRepeat(tx, c.req.param('id'), c.get('user').userId, await dispenserCode(tx, getCookie(c, RX_COOKIE))))
     return c.redirect(`/dispensary/scripts/${id}`)
   })
 

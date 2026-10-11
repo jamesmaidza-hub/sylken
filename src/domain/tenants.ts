@@ -11,7 +11,7 @@ export interface NewTenant {
   address?: string
   phone?: string
   /** The first login. Its roles default to pharmacist + manager, the usual owner-pharmacist. */
-  owner: { email: string; name: string; password: string; roles?: Role[] }
+  owner: { email: string; name: string; password: string; roles?: Role[]; staffCode?: string }
 }
 
 /** A new pharmacy: tenant row, default settings, adjustment reasons, label directions, its first owner login and one till. */
@@ -24,7 +24,11 @@ export async function createTenant(db: Sql, input: NewTenant): Promise<string> {
       await tx`insert into adjustment_reasons (tenant_id, code, label) values (${t.id}, ${code}, ${label})`
     }
     const roles = input.owner.roles ?? ['pharmacist', 'manager']
-    await tx`insert into users (tenant_id, email, name, roles, password_hash) values (${t.id}, ${input.owner.email}, ${input.owner.name}, ${roles}, ${hash})`
+    // The owner's 2-letter staff code: the one given, or the initials of their name (James Maidza is JM).
+    const words = input.owner.name.trim().split(/\s+/).filter(Boolean)
+    const initials = (words.length > 1 ? words[0][0] + words[words.length - 1][0] : (words[0] ?? '').slice(0, 2)).toUpperCase()
+    const staffCode = input.owner.staffCode?.trim().toUpperCase() || (/^[A-Z]{2}$/.test(initials) ? initials : null)
+    await tx`insert into users (tenant_id, email, name, roles, password_hash, staff_code) values (${t.id}, ${input.owner.email}, ${input.owner.name}, ${roles}, ${hash}, ${staffCode})`
     await tx`insert into tills (tenant_id, code, name) values (${t.id}, 'T1', 'Till 1')`
     for (const [code, text] of defaultDirections) {
       await tx`insert into directions (tenant_id, code, text) values (${t.id}, ${code}, ${text})`

@@ -1,5 +1,7 @@
 import { Hono } from 'hono'
 import { deleteCookie } from 'hono/cookie'
+import { raw } from 'hono/html'
+import { DomainError } from '../domain/errors.js'
 import {
   changeOwnPassword, createUser, getUser, listUsers, resetSecondFactor, setPassword, unlockUser, updateUser,
 } from '../domain/users.js'
@@ -32,7 +34,7 @@ function RoleTable() {
           <tr><td>{label}</td>{roles.map((r) => <td>{(rolePermissions[r] as readonly string[]).includes(p) ? '✓' : ''}</td>)}</tr>
         ))}</tbody>
       </table></div>
-      <p class="hint">Pharmacists and managers also type a second PIN at every login.</p>
+      <p class="hint">Supervisors, pharmacists and managers also type a second PIN at every login.</p>
     </details>
   )
 }
@@ -42,25 +44,33 @@ export function userRoutes() {
 
   r.get('/', async (c) => {
     const users = await run(c, listUsers)
+    // The add buttons open the form below with that role already ticked.
+    const add = roles.find((x) => x === c.req.query('add'))
     return page(c, 'Users', (
       <>
-        <h1>Users</h1>
+        <div class="row"><h1>Users</h1><span class="spacer" />
+          {(['manager', 'supervisor', 'dispenser', 'assistant'] as const).map((x) => (
+            <a class={add === x ? 'btn' : 'btn secondary'} href={`/users?add=${x}#add-login`}>+ Add {roleLabels[x].toLowerCase()}</a>
+          ))}</div>
         <div class="wrap"><table>
-          <thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Second PIN</th><th>Status</th></tr></thead>
+          <thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Roles</th><th>Second PIN</th><th>Status</th></tr></thead>
           <tbody>{users.map((u) => (
-            <tr data-href={`/users/${u.id}`}><td><a href={`/users/${u.id}`}>{u.name}</a></td><td>{u.email}</td>
+            <tr data-href={`/users/${u.id}`}><td><b>{u.staffCode ?? <span class="muted" title="No code: cannot ring sales or start scripts">none</span>}</b></td><td><a href={`/users/${u.id}`}>{u.name}</a></td><td>{u.email}</td>
               <td>{u.roles.map((x) => roleLabels[x]).join(', ')}</td><td>{u.secondFactor ? 'set up' : ''}</td>
               <td>{!u.active ? 'switched off' : u.lockedUntil ? `locked until ${dateTime(u.lockedUntil)}` : 'active'}</td></tr>
           ))}</tbody>
         </table></div>
-        <h2>Add a login</h2>
+        <h2 id="add-login">{add ? `Add a ${roleLabels[add].toLowerCase()}` : 'Add a login'}</h2>
         <form method="post" action="/users" class="grid panel">
-          <label>Name<input name="name" required /></label>
+          <label>Name<input name="name" required autofocus={!!add} /></label>
+          <label>Staff code (2 letters)<input name="staffCode" required minlength={2} maxlength={2} pattern="[A-Za-z]{2}" autocomplete="off" style="text-transform:uppercase;width:90px" title="Two letters, like JM" /></label>
           <label>Email<input name="email" type="email" required /></label>
           <label>First password<input name="password" type="password" required minlength={security.minPasswordLength} autocomplete="new-password" /></label>
-          <RoleBoxes />
+          <RoleBoxes checked={add ? [add] : []} />
           <div><button>Add login</button></div>
         </form>
+        <script>{raw(`(function(){var f=document.querySelector('form[action="/users"]');if(!f)return;var n=f.elements.name,c=f.elements.staffCode,touched=false;c.addEventListener('input',function(){touched=true;c.value=c.value.replace(/[^A-Za-z]/g,'').toUpperCase().slice(0,2)});n.addEventListener('input',function(){if(touched)return;var w=n.value.trim().split(/\\s+/).filter(Boolean);var s=w.length>1?w[0][0]+w[w.length-1][0]:(w[0]||'').slice(0,2);c.value=s.replace(/[^A-Za-z]/g,'').toUpperCase()})})()`)}</script>
+        <p class="hint">The staff code is what a cashier types at the till for every sale, and a dispenser types for every script. It is unique to the person.</p>
         <p class="hint">Each person gets their own login; never share one. Tell them their first password in person and ask them to change it under their name at the top of the screen.</p>
         <RoleTable />
       </>
@@ -69,7 +79,8 @@ export function userRoutes() {
 
   r.post('/', async (c) => {
     const b = await c.req.parseBody()
-    const id = await run(c, (tx) => createUser(tx, { name: String(b.name ?? ''), email: String(b.email ?? ''), password: String(b.password ?? ''), roles: rolesFrom(b) }, c.get('user').userId))
+    if (!String(b.staffCode ?? '').trim()) throw new DomainError('give the person a 2-letter staff code, like JM')
+    const id = await run(c, (tx) => createUser(tx, { name: String(b.name ?? ''), email: String(b.email ?? ''), password: String(b.password ?? ''), roles: rolesFrom(b), staffCode: String(b.staffCode) }, c.get('user').userId))
     return back(c, `/users/${id}`, { ok: 'Login added' })
   })
 
@@ -81,6 +92,7 @@ export function userRoutes() {
         <div class="row"><h1>{u.name}</h1><span class="spacer" /><a class="btn secondary" href="/users">All users</a></div>
         <form method="post" action={`/users/${u.id}`} class="grid panel">
           <label>Name<input name="name" value={u.name} required /></label>
+          <label>Staff code (2 letters)<input name="staffCode" value={u.staffCode ?? ''} maxlength={2} pattern="[A-Za-z]{2}" autocomplete="off" style="text-transform:uppercase;width:90px" /></label>
           <label>Email<input name="email" type="email" value={u.email} required /></label>
           <RoleBoxes checked={u.roles} />
           <label class="row" style="flex-direction:row"><input type="checkbox" name="active" checked={u.active} /> Login switched on</label>
@@ -103,7 +115,7 @@ export function userRoutes() {
 
   r.post('/:id', async (c) => {
     const b = await c.req.parseBody()
-    await run(c, (tx) => updateUser(tx, c.req.param('id'), { name: String(b.name ?? ''), email: String(b.email ?? ''), roles: rolesFrom(b), active: b.active === 'on' }, c.get('user').userId))
+    await run(c, (tx) => updateUser(tx, c.req.param('id'), { name: String(b.name ?? ''), email: String(b.email ?? ''), roles: rolesFrom(b), active: b.active === 'on', staffCode: b.staffCode === undefined ? undefined : String(b.staffCode) }, c.get('user').userId))
     return back(c, `/users/${c.req.param('id')}`, { ok: 'Saved' })
   })
 
