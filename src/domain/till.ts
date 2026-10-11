@@ -285,25 +285,38 @@ export async function getSale(tx: Tx, id: string) {
 
 // ---------------------------------------------------------------- petty cash and account payments
 
+/** Why a drawer was opened without a sale. A reason is always given; "other" also needs a note. */
+export const noSaleReasons = { change: 'Making change', count: 'Counting the drawer', error: 'Correcting a mistake', other: 'Other' } as const
+export type NoSaleReason = keyof typeof noSaleReasons
+
 export interface TillEntryInput {
   id: string
   runId: string
-  kind: 'petty_cash' | 'account_payment'
+  kind: 'petty_cash' | 'account_payment' | 'cash_drop' | 'no_sale'
   tender: DrawerTender
-  amount: number
+  amount: number                 // 0 for a no-sale
   accountId?: string | null
-  note?: string | null
+  note?: string | null           // petty cash: what for; cash drop: who or where it went; no-sale: details
+  reason?: NoSaleReason | null   // no-sale only
+  cashierCode?: string | null    // the staff code typed for a cash drop or no-sale
   occurredAt: Date
 }
 
 export async function recordTillEntry(tx: Tx, e: TillEntryInput, opts: { userId?: string | null } = {}) {
   const [dupe] = await tx`select id from till_entries where id = ${e.id}`
   if (dupe) return { recorded: false }
-  if (!(e.amount > 0)) throw new DomainError('amount must be more than zero')
+  if (e.kind === 'no_sale' ? e.amount !== 0 : !(e.amount > 0)) throw new DomainError(e.kind === 'no_sale' ? 'a no-sale moves no money' : 'amount must be more than zero')
   if (!drawerTenders.includes(e.tender)) throw new DomainError(`unknown tender ${e.tender}`)
   if (e.kind === 'petty_cash') {
     if (e.tender !== 'cash') throw new DomainError('petty cash is paid out in cash')
     if (!e.note?.trim()) throw new DomainError('say what the petty cash was for')
+  } else if (e.kind === 'cash_drop') {
+    if (e.tender !== 'cash') throw new DomainError('a cash drop is cash')
+    if (!e.note?.trim()) throw new DomainError('say who or where the cash was dropped to')
+  } else if (e.kind === 'no_sale') {
+    if (e.tender !== 'cash') throw new DomainError('a no-sale opens the cash drawer')
+    if (!e.reason || !(e.reason in noSaleReasons)) throw new DomainError('give a reason for opening the drawer without a sale')
+    if (e.reason === 'other' && !e.note?.trim()) throw new DomainError('say why the drawer was opened')
   } else if (e.kind === 'account_payment') {
     if (!e.accountId) throw new DomainError('an account payment needs the customer account')
     const [acc] = await tx`select id from customer_accounts where id = ${e.accountId}`
@@ -314,10 +327,20 @@ export async function recordTillEntry(tx: Tx, e: TillEntryInput, opts: { userId?
   const [run] = await tx`select status from till_runs where id = ${e.runId}`
   if (!run) throw new DomainError('unknown till run', 'not_found', 404)
   const amount = round2(e.amount)
+  const cashierCode = e.cashierCode?.trim().toUpperCase() || null
   await tx`
-    insert into till_entries (id, tenant_id, till_run_id, kind, tender, amount, account_id, note, user_id, occurred_at, late)
+    insert into till_entries (id, tenant_id, till_run_id, kind, tender, amount, account_id, note, user_id, occurred_at, late, reason, cashier_code)
     values (${e.id}, current_setting('app.tenant_id')::uuid, ${e.runId}, ${e.kind}, ${e.tender}, ${amount},
-            ${e.accountId ?? null}, ${e.note?.trim() || null}, ${opts.userId ?? null}, ${e.occurredAt}, ${run.status === 'closed'})`
+            ${e.accountId ?? null}, ${e.note?.trim() || null}, ${opts.userId ?? null}, ${e.occurredAt}, ${run.status === 'closed'},
+            ${e.kind === 'no_sale' ? e.reason! : null}, ${cashierCode})`
+  if (e.kind === 'no_sale') {
+    // Opening the drawer with no sale is a loss-prevention event: it goes in the audit log marked high priority.
+    await audit(tx, opts.userId, 'no_sale', 'till_run', e.runId, {
+      priority: 'high', reason: e.reason, reasonLabel: noSaleReasons[e.reason!], note: e.note?.trim() || null, cashierCode, at: e.occurredAt,
+    })
+  } else if (e.kind === 'cash_drop') {
+    await audit(tx, opts.userId, 'cash_drop', 'till_run', e.runId, { amount, to: e.note?.trim(), cashierCode })
+  }
   if (e.kind === 'account_payment') {
     await tx`
       insert into account_entries (tenant_id, account_id, kind, amount, ref_type, ref_id, note, user_id, occurred_at)
@@ -354,6 +377,8 @@ export interface RunSummary {
   byTender: Record<Tender, number>          // sales less refunds, per tender
   accountPayments: Record<DrawerTender, number>
   pettyCash: number
+  cashDrops: number                         // cash taken out of the drawer to the safe or a supervisor
+  noSales: number                           // times the drawer was opened without a sale
   expected: Record<CountedTender | 'eft', number>
   counts: { tender: CountedTender; expected: number; counted: number; surplus: number }[]
   surplus: number | null                    // over all counted tenders, once cashed up
@@ -378,7 +403,7 @@ export async function runSummary(tx: Tx, runId: string): Promise<RunSummary | nu
     select p.tender, sum(p.amount) as amount from sale_payments p join sales s on s.id = p.sale_id
      where s.till_run_id = ${runId} group by p.tender`
   const entries = await tx`
-    select kind, tender, sum(amount) as amount, count(*) filter (where late)::int as late_count
+    select kind, tender, sum(amount) as amount, count(*)::int as n, count(*) filter (where late)::int as late_count
       from till_entries where till_run_id = ${runId} group by kind, tender`
   const people = await tx`
     select distinct u.name from users u
@@ -390,15 +415,20 @@ export async function runSummary(tx: Tx, runId: string): Promise<RunSummary | nu
   for (const p of pays) byTender[p.tender as Tender] = round2(num(p.amount))
   const accountPayments = zeroDrawer()
   let pettyCash = 0
+  let cashDrops = 0
+  let noSales = 0
   let lateEntries = 0
   for (const e of entries) {
     if (e.kind === 'account_payment') accountPayments[e.tender as DrawerTender] = round2(num(e.amount))
     if (e.kind === 'petty_cash') pettyCash = round2(pettyCash + num(e.amount))
+    if (e.kind === 'cash_drop') cashDrops = round2(cashDrops + num(e.amount))
+    if (e.kind === 'no_sale') noSales += e.n as number
     lateEntries += e.late_count as number
   }
   const openingFloat = num(r.opening_float)
+  // What the drawer should hold: Opening float + net cash takings - petty cash - cash drops.
   const expected = {
-    cash: round2(openingFloat + byTender.cash + accountPayments.cash - pettyCash),
+    cash: round2(openingFloat + byTender.cash + accountPayments.cash - pettyCash - cashDrops),
     card: round2(byTender.card + accountPayments.card),
     cheque: round2(byTender.cheque + accountPayments.cheque),
     eft: round2(byTender.eft + accountPayments.eft),
@@ -412,7 +442,7 @@ export async function runSummary(tx: Tx, runId: string): Promise<RunSummary | nu
     openedAt: r.opened_at, openedBy: r.opened_by_name, closedAt: r.closed_at, closedBy: r.closed_by_name,
     openingFloat, floatKept: numOrNull(r.float_kept), note: r.note,
     sales: { count: s.sales, refunds: s.refunds, total: num(s.total), rounding: num(s.rounding), vat: num(s.vat), cost: num(s.cost), firstAt: s.first_at, lastAt: s.last_at },
-    byTender, accountPayments, pettyCash, expected, counts: countRows,
+    byTender, accountPayments, pettyCash, cashDrops, noSales, expected, counts: countRows,
     surplus: r.status === 'closed' ? round2(countRows.reduce((a, c) => a + c.surplus, 0)) : null,
     late: { count: (s.late_count as number) + lateEntries, total: num(s.late_total) },
     assistants: people.map((p) => p.name as string),
@@ -495,7 +525,13 @@ export async function applyTillOps(tx: Tx, tillId: string, ops: TillOp[], sessio
           return { id, status: r.recorded ? 'recorded' : 'duplicate', saleNo: r.saleNo } as OpResult
         }
         if (op.type === 'till_entry') {
-          const r = await recordTillEntry(sp, op.data, { userId })
+          // A cash drop or a no-sale is done under a cashier's staff code, like a sale.
+          let entryUser = userId
+          if (op.data.kind === 'cash_drop' || op.data.kind === 'no_sale') {
+            if (!op.data.cashierCode?.trim()) throw new DomainError('this entry has no cashier code')
+            entryUser = (await staffByCode(sp, op.data.cashierCode, 'till.use'))?.id ?? userId
+          }
+          const r = await recordTillEntry(sp, op.data, { userId: entryUser })
           return { id, status: r.recorded ? 'recorded' : 'duplicate' } as OpResult
         }
         throw new DomainError(`unknown operation ${(op as any).type}`)

@@ -117,6 +117,10 @@ header a.nav:hover{background:color-mix(in srgb,var(--accent) 18%,var(--chip))}
  * their warning colours.
  */
 :root{--go:#0d6b5e}
+/* "Cash drop due": the drawer holds more than the shop's limit. It never shows how much, so the cash-up count stays blind. */
+.cash-alert{background:var(--warn);color:#fff;font-weight:700;border:0;border-radius:8px;padding:6px 12px;animation:cashpulse 1.4s ease-in-out infinite}
+@keyframes cashpulse{50%{box-shadow:0 0 0 6px color-mix(in srgb,var(--warn) 35%,transparent)}}
+@media (prefers-reduced-motion:reduce){.cash-alert{animation:none}}
 .pad button.act:not(.warn):not(.bad),.tenders button{
   background:var(--panel);color:var(--ink);border:2px solid var(--accent);border-radius:8px;
   transition:background-color .18s ease,color .18s ease,border-color .18s ease,box-shadow .18s ease,transform .1s ease}

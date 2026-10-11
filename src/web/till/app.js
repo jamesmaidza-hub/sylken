@@ -104,6 +104,7 @@
     $('till-label').textContent = t ? `${t.name} (${t.code})` : 'No till chosen'
     $('run-label').textContent = run ? (run.runNo ? `Run ${run.runNo}` : 'Run (not sent yet)') : 'No run open'
     showCashier()
+    cashLimitAlert()
     const net = $('net')
     net.textContent = online ? 'Online' : 'Offline: sales are kept on this till'
     net.className = 'net ' + (online ? 'on' : 'off')
@@ -189,7 +190,7 @@
     if (!v) return false
     const float = num(v.float)
     if (!(float >= 0)) { banner('The float must be a number.', true); return false }
-    run = { id: uuid(), tillId, openedAt: new Date().toISOString(), float }
+    run = { id: uuid(), tillId, openedAt: new Date().toISOString(), float, cash: float }
     save('run', run)
     queue({ type: 'open_run', data: { id: run.id, tillId, openingFloat: float, openedAt: run.openedAt } })
     header()
@@ -535,6 +536,7 @@
     queue({ type: 'sale', data: sale })
     const slipNo = (load('slipNo', 0) || 0) + 1
     save('slipNo', slipNo)
+    addDrawerCash(refund ? -cashPaid : cashPaid)      // cash taken in on a sale, or paid out on a refund
     const onAccount = round2(payments.filter((p) => p.tender === 'account').reduce((a, p) => a + p.amount, 0))
     if (accountId && onAccount) noteAccountMove(sale.id, accountId, sign * onAccount)
     lastSlip = { sale, slipNo, lines: cart.lines.map((l) => ({ d: l.d, units: l.units, n: l.n, lineTotal: l.lineTotal, v: l.v, vat: l.vat })), change, cashier: `${cashier.n} (${cashier.c})`, at: sale.occurredAt,
@@ -562,6 +564,21 @@
 
   // ------------------------------------------------------------ other drawer entries
 
+  // The cash the drawer should hold, kept as sales and entries are made so the till can ask for a cash drop when it grows
+  // too big. It is never shown: the cashier counts the drawer blind at cash-up.
+  function addDrawerCash(delta) {
+    if (!run) return
+    run.cash = round2((run.cash ?? run.float ?? 0) + delta)
+    save('run', run)
+    cashLimitAlert()
+  }
+  function cashLimitAlert() {
+    const limit = cat && cat.tenant ? Number(cat.tenant.cashDropLimit || 0) : 0
+    $('cash-alert').hidden = !(limit > 0 && run && (run.cash ?? 0) > limit)
+  }
+  /** The staff member for a 2-letter code typed in a pop-up, or null. */
+  const staffFor = (code) => (cat && cat.staff || []).find((s) => s.c === String(code || '').trim().toUpperCase()) || null
+
   async function pettyCash() {
     if (!(await ensureRun())) return
     const v = await ask(`<h2>Petty cash out of the drawer</h2>
@@ -571,7 +588,44 @@
     const amount = round2(num(v.amount))
     if (!(amount > 0) || !v.note.trim()) { banner('Petty cash needs an amount and what it was for.', true); return }
     queue({ type: 'till_entry', data: { id: uuid(), runId: run.id, kind: 'petty_cash', tender: 'cash', amount, note: v.note.trim(), occurredAt: new Date().toISOString() } })
+    addDrawerCash(-amount)
     banner(`Petty cash ${money(amount)} recorded.`)
+    sync()
+  }
+
+  /** Cash taken out of the drawer to the safe or a supervisor. It lowers what the drawer is expected to hold at cash-up. */
+  async function cashDrop() {
+    if (!(await ensureRun())) return
+    const v = await ask(`<h2>Cash drop</h2><p class="muted">Take cash out of the drawer to the safe or to a supervisor.</p>
+      <label>Your staff code<input name="code" maxlength="2" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase;width:90px" autofocus></label>
+      <label>Amount (P)<input name="amount" inputmode="decimal"></label>
+      <label>Dropped to<input name="to" maxlength="200" value="Safe"></label>${buttons('Record the drop')}`)
+    if (!v) return
+    const who = staffFor(v.code)
+    if (!who) { banner(`${esc(String(v.code || '').trim().toUpperCase() || 'That')} is not a staff code.`, true); return }
+    const amount = round2(num(v.amount))
+    const to = String(v.to || '').trim()
+    if (!(amount > 0) || !to) { banner('A cash drop needs an amount and where it went.', true); return }
+    queue({ type: 'till_entry', data: { id: uuid(), runId: run.id, kind: 'cash_drop', tender: 'cash', amount, note: to, cashierCode: who.c, occurredAt: new Date().toISOString() } })
+    addDrawerCash(-amount)
+    banner(`Cash drop of ${money(amount)} recorded (${esc(who.n)}). Put it in the ${esc(to.toLowerCase())}.`)
+    sync()
+  }
+
+  /** The drawer is opened without a sale. A reason is always given, and every no-sale is logged as a high-priority event. */
+  async function noSale() {
+    if (!(await ensureRun())) return
+    const v = await ask(`<h2>No sale: open the drawer</h2><p class="muted">Every no-sale is recorded in the audit log.</p>
+      <label>Your staff code<input name="code" maxlength="2" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase;width:90px" autofocus></label>
+      <label>Reason<select name="reason"><option value="change">Making change</option><option value="count">Counting the drawer</option><option value="error">Correcting a mistake</option><option value="other">Other (say why)</option></select></label>
+      <label>Details (needed for "Other")<input name="note" maxlength="200"></label>${buttons('Record no-sale')}`)
+    if (!v) return
+    const who = staffFor(v.code)
+    if (!who) { banner(`${esc(String(v.code || '').trim().toUpperCase() || 'That')} is not a staff code.`, true); return }
+    const note = String(v.note || '').trim()
+    if (v.reason === 'other' && !note) { banner('Say why the drawer is being opened.', true); return }
+    queue({ type: 'till_entry', data: { id: uuid(), runId: run.id, kind: 'no_sale', tender: 'cash', amount: 0, reason: v.reason, note: note || null, cashierCode: who.c, occurredAt: new Date().toISOString() } })
+    banner(`No-sale recorded (${esc(who.n)}). The drawer can be opened now.`)
     sync()
   }
 
@@ -589,6 +643,7 @@
     const entryId = uuid()
     queue({ type: 'till_entry', data: { id: entryId, runId: run.id, kind: 'account_payment', tender: v.tender, amount, accountId: v.account, occurredAt: new Date().toISOString() } })
     noteAccountMove(entryId, v.account, -amount)
+    if (v.tender === 'cash') addDrawerCash(amount)
     const a = cat.accounts.find((x) => x.id === v.account)
     banner(`${money(amount)} received from ${esc(a ? a.name : 'account')}.`)
     sync()
@@ -764,6 +819,7 @@
   }
 
   $('touch-toggle').addEventListener('click', () => setTouch(!touch))
+  $('cash-alert').addEventListener('click', cashDrop)
   $('quick').addEventListener('click', async (e) => { const b = e.target.closest('[data-q]'); if (b) { await quickSale(Number(b.dataset.q)); $('scan').focus({ preventScroll: true }) } })
   document.querySelector('.pad').addEventListener('click', (e) => {
     const b = e.target.closest('button')
@@ -773,7 +829,7 @@
     if (k === 'C') { scan.value = ''; results = []; showResults() }
     else if (k === 'enter') onScanEnter()
     else if (k) scan.value += k
-    const actions = { qty: setQtyFromPad, price: changePrice, void: removeLine, voidall: clearSale, script: addScript, refund: toggleRefund, reprint: printSlip, pay }
+    const actions = { qty: setQtyFromPad, price: changePrice, void: removeLine, voidall: clearSale, script: addScript, refund: toggleRefund, reprint: printSlip, nosale: noSale, drop: cashDrop, pay }
     if (b.dataset.a) actions[b.dataset.a]()
     if (!modalDone) scan.focus({ preventScroll: true })   // a scanner always types into the sale
   })
@@ -797,7 +853,7 @@
     const inScan = e.target === scan
     const inCode = e.target === $('cashier-code')
     const k = e.key
-    const fkeys = { F2: addScript, F4: changeQty, F5: pay, F6: changePrice, F8: toggleRefund, F9: pettyCash, F10: accountPayment, F12: printSlip }
+    const fkeys = { F2: addScript, F3: noSale, F4: changeQty, F5: pay, F6: changePrice, F7: cashDrop, F8: toggleRefund, F9: pettyCash, F10: accountPayment, F12: printSlip }
     if (fkeys[k]) { e.preventDefault(); fkeys[k](); return }
     if (k === 'Escape') {
       e.preventDefault()

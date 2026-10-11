@@ -64,7 +64,8 @@ export async function salesSummary(tx: Tx, range: DayRange & { tillId?: string }
     const cheque = run.expected.cheque
     const totalTill = round2(cash + card + cheque)
     const c = Object.fromEntries(run.counts.map((x) => [x.tender, x.counted])) as Record<string, number>
-    const counted = run.status === 'closed' ? round2((c.cash ?? 0) - run.openingFloat + (c.card ?? 0) + (c.cheque ?? 0)) : null
+    // Cash dropped to the safe during the run is still takings: it was not in the drawer when it was counted, so add it back.
+    const counted = run.status === 'closed' ? round2((c.cash ?? 0) - run.openingFloat + run.cashDrops + (c.card ?? 0) + (c.cheque ?? 0)) : null
     return { run, cash, card, cheque, totalTill, counted, surplus: counted === null ? null : round2(counted - totalTill), directBank: run.expected.eft }
   })
 
@@ -90,7 +91,7 @@ export async function salesSummary(tx: Tx, range: DayRange & { tillId?: string }
   const closed = rows.filter((r) => r.run.status === 'closed')
   const countedOf = (r: CashAnalysisRow, t: string) => r.run.counts.find((c) => c.tender === t)?.counted ?? 0
   const creditCard = round2(closed.reduce((a, r) => a + countedOf(r, 'card'), 0))
-  const depAmount = round2(closed.reduce((a, r) => a + countedOf(r, 'cash') - r.run.openingFloat + countedOf(r, 'cheque'), 0))
+  const depAmount = round2(closed.reduce((a, r) => a + countedOf(r, 'cash') - r.run.openingFloat + r.run.cashDrops + countedOf(r, 'cheque'), 0))
   const closedPayments = round2(closed.reduce((a, r) => a + r.totalTill, 0))
   const bank = {
     creditCard, depAmount, total: round2(creditCard + depAmount),

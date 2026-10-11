@@ -40,8 +40,9 @@ const opSchema = z.discriminatedUnion('type', [
     payments: z.array(z.object({ tender: z.enum(tenders), amount: money, reference: z.string().max(60).nullish() })).max(10),
   }) }),
   z.object({ type: z.literal('till_entry'), userId: z.string().uuid().nullish(), data: z.object({
-    id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['petty_cash', 'account_payment']), tender: z.enum(drawerTenders),
+    id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['petty_cash', 'account_payment', 'cash_drop', 'no_sale']), tender: z.enum(drawerTenders),
     amount: money, accountId: z.string().uuid().nullish(), note: z.string().max(200).nullish(), occurredAt: when,
+    reason: z.enum(['change', 'count', 'error', 'other']).nullish(), cashierCode: z.string().max(4).nullish(),
   }) }),
 ])
 const syncSchema = z.object({
@@ -94,7 +95,7 @@ export function api() {
       const staff = await staffWithCodes(tx, 'till.use')
       return {
         staff: staff.map((s) => ({ c: s.code, n: s.name })),
-        tenant: { id: user.tenantId, name: user.tenantName, vatNumber: settings.vatNumber, receiptFooter: settings.receiptFooter, defaultFloat: settings.defaultFloat, cashRounding: settings.cashRounding, vatRate: settings.vatRate, buttons: settings.tillButtons },
+        tenant: { id: user.tenantId, name: user.tenantName, vatNumber: settings.vatNumber, receiptFooter: settings.receiptFooter, defaultFloat: settings.defaultFloat, cashDropLimit: settings.cashDropLimit, cashRounding: settings.cashRounding, vatRate: settings.vatRate, buttons: settings.tillButtons },
         user: { id: user.userId, name: user.name, roles: user.roles },
         tills: tills.map((t) => ({ id: t.id, code: t.code, name: t.name })),
         accounts: accounts.map((a) => ({
