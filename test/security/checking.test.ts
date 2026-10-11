@@ -62,3 +62,17 @@ describe('1.8 dispenser and checker are different people', () => {
     await expect(p.t.as((tx) => checkScript(tx, scriptId, p.pharmacist2.id))).rejects.toThrow(/only a dispensed script/)
   })
 })
+
+describe('1.8 labels print only after the check (james, 2026-10-11)', () => {
+  it('refuses the labels until a second person has checked the script, then prints them', async () => {
+    const id = await dispensedBy(p.dispenser)
+    const page = await (await p.dispenser.get(`/dispensary/scripts/${id}`)).text()
+    expect(page).not.toContain('Print labels')
+    const refused = await p.dispenser.get(`/dispensary/scripts/${id}/labels`, { referer: `http://x/dispensary/scripts/${id}` })
+    expect(new URL(refused.headers.get('location')!, 'http://x').searchParams.get('err')).toMatch(/has not been checked yet/)
+    await p.pharmacist.post(`/dispensary/scripts/${id}/check`)
+    const labels = await p.dispenser.get(`/dispensary/scripts/${id}/labels`)
+    expect(labels.status).toBe(200)
+    expect(await labels.text()).toContain('TESTPATIENT')
+  })
+})

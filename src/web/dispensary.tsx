@@ -13,7 +13,7 @@ import {
   register, removeLine, reverseScript, scriptBook, scriptIdByNo, scriptWarnings, setSupply, startRepeat, supplyOwed, updateDraft, type Label,
 } from '../domain/scripts.js'
 import { getSettings, getShop, nextScriptNo, setNextScriptNo, updateSettings, updateShop } from '../domain/settings.js'
-import { checkScript, scriptCheck } from '../domain/checks.js'
+import { checkScript, requireChecked, scriptCheck } from '../domain/checks.js'
 import { back, can, page, requirePermission, run, type Env } from './app.js'
 import { RangeForm, rangeFrom } from './cashup.js'
 import { date, dateTime, money } from './layout.js'
@@ -575,7 +575,7 @@ export function dispensaryRoutes() {
         <RxToolbar patientId={s.patient.id} />
         <div class="row">
           <h1>{title} {statusChip(s.status)}</h1><span class="spacer" />
-          {s.status === 'dispensed' && <a class="btn" href={`/dispensary/scripts/${s.id}/labels`} target="_blank">Print labels</a>}
+          {s.status === 'dispensed' && data.check && <a class="btn" href={`/dispensary/scripts/${s.id}/labels`} target="_blank">Print labels</a>}
           {s.status === 'dispensed' && !s.repeatOf && s.lines.some((l) => (l.repeatsLeft ?? 0) > 0) &&
             <form method="post" action={`/dispensary/scripts/${s.id}/repeat`}><button class="secondary">Give a repeat</button></form>}
           {s.repeatOf && <a class="btn secondary" href={`/dispensary/scripts/${s.repeatOf.id}`}>Original script {s.repeatOf.scriptNo}</a>}
@@ -736,7 +736,7 @@ export function dispensaryRoutes() {
             ? <form method="post" action={`/dispensary/scripts/${s.id}/check`} class="panel row">
                 <span>Dispensed by {s.dispensedBy}. Check every label, item, strength and quantity against the prescription.</span><span class="spacer" />
                 <button>I have checked this script</button></form>
-            : <p class="muted">Not checked yet. A pharmacist other than the person who dispensed it checks it.</p>}
+            : <p class="muted">Not checked yet. A pharmacist other than the person who dispensed it checks it; the labels print after that.</p>}
           {s.status === 'dispensed' && can(c, 'rx.reverse') && (
             <details><summary>Reverse this script</summary>
               <form method="post" action={`/dispensary/scripts/${s.id}/reverse`} class="grid panel">
@@ -802,7 +802,7 @@ export function dispensaryRoutes() {
     if (b.confirmed === 'on' || b.allowNegative === 'on') requirePermission(c, 'rx.override', 'Only a pharmacist can dispense past a warning.')
     const id = c.req.param('id')
     const { scriptNo } = await run(c, (tx) => dispenseScript(tx, id, { confirmed: b.confirmed === 'on', allowNegative: b.allowNegative === 'on' }, c.get('user').userId))
-    return back(c, `/dispensary/scripts/${id}`, { ok: `Dispensed as script ${scriptNo}. Print the labels, then ring it up at the till.` })
+    return back(c, `/dispensary/scripts/${id}`, { ok: `Dispensed as script ${scriptNo}. Another pharmacist checks it, then the labels print.` })
   })
 
   r.post('/scripts/:id/check', async (c) => {
@@ -829,6 +829,7 @@ export function dispensaryRoutes() {
 
   r.get('/scripts/:id/labels', async (c) => {
     const { labels, shop, settings } = await run(c, async (tx) => ({
+      checked: await requireChecked(tx, { scriptId: c.req.param('id') }),
       labels: await labelsFor(tx, { scriptId: c.req.param('id') }, initials(c.get('user').name) ?? undefined),
       shop: await getShop(tx), settings: await getSettings(tx),
     }))
@@ -837,6 +838,7 @@ export function dispensaryRoutes() {
 
   r.get('/supplies/:id/label', async (c) => {
     const { labels, shop, settings } = await run(c, async (tx) => ({
+      checked: await requireChecked(tx, { supplyId: c.req.param('id') }),
       labels: await labelsFor(tx, { supplyId: c.req.param('id') }), shop: await getShop(tx), settings: await getSettings(tx),
     }))
     return c.html(<LabelSheet labels={labels} shop={shop} settings={settings} />)
