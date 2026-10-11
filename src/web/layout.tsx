@@ -38,6 +38,7 @@ const navGroups: { slug: string; label: string; hue: string; icon: string; items
     ['', 'Script book', '/dispensary/scripts', 'rx.view'],
     ['', 'Register', '/dispensary/register', 'rx.view'],
     ['', 'Doctors', '/dispensary/doctors', 'rx.view'],
+    ['', 'Dispensers', '/dispensary/dispensers', 'users.manage'],
   ] },
   { slug: 'sales', label: 'Sales & admin', hue: '#d9650f', icon: '🧾', items: [
     ['F9', 'Till', '/till/', 'till.use'],
@@ -63,6 +64,7 @@ const tileInfo: Record<string, [icon: string, blurb: string]> = {
   '/dispensary/scripts': ['📖', 'Every script dispensed, to reprint or amend'],
   '/dispensary/register': ['🔒', 'Scheduled medicines register'],
   '/dispensary/doctors': ['🩺', 'Doctors and their practice numbers'],
+  '/dispensary/dispensers': ['🧑‍⚕️', 'The dispensers and their codes, and add a new dispenser'],
   '/till/': ['💳', 'Ring up sales and take payment'],
   '/cashup': ['💰', 'Count the drawer and close the till run'],
   '/sales': ['📈', 'The sales journal'],

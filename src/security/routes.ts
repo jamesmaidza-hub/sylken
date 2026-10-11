@@ -162,6 +162,8 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['POST', '/dispensary/owed/:id/cancel', 'rx.reverse'],
   ['GET', '/dispensary/register', 'rx.view'],
   ['GET', '/dispensary/doctors', 'rx.view'],
+  ['GET', '/dispensary/dispensers', 'users.manage'],
+  ['POST', '/dispensary/dispensers', 'users.manage'],
   ['POST', '/dispensary/doctors', 'rx.capture'],
   ['GET', '/dispensary/doctors/:id', 'rx.view'],
   ['POST', '/dispensary/doctors/:id', 'rx.capture'],

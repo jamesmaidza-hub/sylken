@@ -3,7 +3,9 @@ import { raw } from 'hono/html'
 import { listAccounts } from '../domain/accounts.js'
 import { DomainError } from '../domain/errors.js'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
-import { staffByCode } from '../domain/users.js'
+import { createUser, listUsers, staffByCode } from '../domain/users.js'
+import { roleLabels } from '../security/roles.js'
+import { security } from '../security/config.js'
 import { findByCode, searchItems } from '../domain/items.js'
 import {
   addFlag, ageOn, createPatient, familyOf, getDoctor, getPatient, listDirections, listDoctors, listMedicalAids, patientFlags, removeFlag,
@@ -334,7 +336,8 @@ const RX_COOKIE = 'rx_code'
 const RX_DONE_COOKIE = 'rx_done'
 const rxCookieOptions = { path: '/', httpOnly: true, sameSite: 'Strict' as const, secure: process.env.NODE_ENV === 'production' }
 /** Pages that open without a dispenser code: the code screen itself and the shop's dispensary settings. */
-const openWithoutCode = (path: string) => path === '/dispensary/code' || path === '/dispensary/code/clear' || path.startsWith('/dispensary/settings')
+const openWithoutCode = (path: string) =>
+  path === '/dispensary/code' || path === '/dispensary/code/clear' || path.startsWith('/dispensary/settings') || path === '/dispensary/dispensers'
 
 /** Only ever send people back to a dispensary page. */
 const safeNext = (v: unknown) => { const s = String(v ?? ''); return s.startsWith('/dispensary') && !s.startsWith('//') ? s : '/dispensary' }
@@ -990,6 +993,45 @@ export function dispensaryRoutes() {
         {(reg.schedules.length > 0 || itemId) && !reg.items.length && <p class="muted">No registered items moved in this range.</p>}
       </>
     ))
+  })
+
+  // ------------------------------------------------------------ dispensers (the dispensary's staff)
+
+  /** The dispensers and pharmacists with their staff codes, and a form to add a dispenser. Managers only: it makes logins. */
+  r.get('/dispensers', async (c) => {
+    const staff = (await run(c, listUsers)).filter((u) => u.roles.includes('dispenser') || u.roles.includes('pharmacist'))
+    return page(c, 'Dispensers', (
+      <>
+        <h1>Dispensers</h1>
+        <p class="muted">Everyone who dispenses has their own login and a 2-letter staff code. The code is typed to open the dispensary and is recorded on every script they start.</p>
+        <div class="wrap"><table>
+          <thead><tr><th>Code</th><th>Name</th><th>Email</th><th>Roles</th><th>Status</th></tr></thead>
+          <tbody>{staff.map((u) => (
+            <tr data-href={`/users/${u.id}`} class={u.active ? '' : 'muted'}>
+              <td><b>{u.staffCode ?? <span class="muted" title="No code: cannot start scripts">none</span>}</b></td>
+              <td><a href={`/users/${u.id}`}>{u.name}</a></td><td>{u.email}</td>
+              <td>{u.roles.map((x) => roleLabels[x]).join(', ')}</td><td>{u.active ? 'active' : 'switched off'}</td></tr>
+          ))}</tbody>
+        </table></div>
+        <h2>Add a dispenser</h2>
+        <form method="post" action="/dispensary/dispensers" class="grid panel" id="add-dispenser">
+          <label>Name<input name="name" required autofocus /></label>
+          <label>Staff code (2 letters)<input name="staffCode" required minlength={2} maxlength={2} pattern="[A-Za-z]{2}" autocomplete="off" style="text-transform:uppercase;width:90px" title="Two letters, like JM" /></label>
+          <label>Email<input name="email" type="email" required /></label>
+          <label>First password<input name="password" type="password" required minlength={security.minPasswordLength} autocomplete="new-password" /></label>
+          <div><button>Add dispenser</button></div>
+        </form>
+        <p class="hint">Tell them their first password in person and ask them to change it under their name at the top of the screen. To add a pharmacist or change a role, use Sales &amp; admin → Users.</p>
+        <script>{raw(`(function(){var f=document.getElementById('add-dispenser');if(!f)return;var n=f.elements.name,c=f.elements.staffCode,touched=false;c.addEventListener('input',function(){touched=true;c.value=c.value.replace(/[^A-Za-z]/g,'').toUpperCase().slice(0,2)});n.addEventListener('input',function(){if(touched)return;var w=n.value.trim().split(/\\s+/).filter(Boolean);var s=w.length>1?w[0][0]+w[w.length-1][0]:(w[0]||'').slice(0,2);c.value=s.replace(/[^A-Za-z]/g,'').toUpperCase()})})()`)}</script>
+      </>
+    ))
+  })
+
+  r.post('/dispensers', async (c) => {
+    const b = await c.req.parseBody()
+    if (!str(b.staffCode)) throw new DomainError('give the person a 2-letter staff code, like JM')
+    await run(c, (tx) => createUser(tx, { name: str(b.name), email: str(b.email), password: String(b.password ?? ''), roles: ['dispenser'], staffCode: str(b.staffCode) }, c.get('user').userId))
+    return back(c, '/dispensary/dispensers', { ok: 'Dispenser added' })
   })
 
   // ------------------------------------------------------------ doctors

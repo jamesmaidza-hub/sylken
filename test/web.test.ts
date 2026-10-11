@@ -34,10 +34,25 @@ describe('web', () => {
       '/till/', '/till/app.js', '/till/sw.js', '/cashup', '/cashup/problems', '/sales', '/accounts', '/accounts/aging', '/reports/sales', '/reports/sales-gp',
       '/reports/sales?format=csv', '/reports/sales-gp?format=csv', '/dispensary', '/dispensary?q=smith', '/dispensary/patients/new',
       '/dispensary/scripts', '/dispensary/scripts?format=csv', '/dispensary/owed', '/dispensary/register', '/dispensary/register?format=csv',
-      '/dispensary/doctors', '/dispensary/settings', '/dispensary/scripts?format=xlsx', '/dispensary/register?format=xlsx', '/reports/rx', '/sales?from=2026-01-01']) {
+      '/dispensary/doctors', '/dispensary/dispensers', '/dispensary/settings', '/dispensary/scripts?format=xlsx', '/dispensary/register?format=xlsx', '/reports/rx', '/sales?from=2026-01-01']) {
       const res = await get(p)
       expect(res.status, p).toBe(200)
     }
+  })
+
+  it('adds a dispenser with a staff code from the Dispensary menu', async () => {
+    const { t, get, post } = await loggedIn()
+    const menu = await (await get('/menu/dispensary')).text()
+    expect(menu).toContain('href="/dispensary/dispensers"')                                 // the Dispensers tab is in the Dispensary menu
+    const res = await post('/dispensary/dispensers', { name: 'Pula Dube', staffCode: 'pd', email: 'pula.dube@example.test', password: 'fake-pass-123' })
+    expect(new URL(res.headers.get('location')!, 'http://x').searchParams.get('ok')).toBe('Dispenser added')
+    const page = await (await get('/dispensary/dispensers')).text()
+    expect(page).toContain('Pula Dube')
+    expect(page).toContain('>PD<')                                                          // the code is kept in capitals
+    expect(await t.as((tx) => tx`select roles, staff_code from users where email = 'pula.dube@example.test'`)).toMatchObject([{ roles: ['dispenser'], staff_code: 'PD' }])
+    // Another person cannot take the same code, and a code is required.
+    expect(new URL((await post('/dispensary/dispensers', { name: 'Pat Dee', staffCode: 'PD', email: 'pat@example.test', password: 'fake-pass-123' })).headers.get('location')!, 'http://x').searchParams.get('err')).toMatch(/already belongs to Pula Dube/)
+    expect(new URL((await post('/dispensary/dispensers', { name: 'No Code', staffCode: '', email: 'nc@example.test', password: 'fake-pass-123' })).headers.get('location')!, 'http://x').searchParams.get('err')).toMatch(/staff code/)
   })
 
   it('serves every dispensary report on screen, as CSV and as Excel', async () => {
