@@ -2,11 +2,12 @@ import { randomUUID } from 'node:crypto'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Sql } from '../src/db/index.js'
 import { accountStatement, ageAnalysis, createAccount, postAccountEntry } from '../src/domain/accounts.js'
+import { issueApproval } from '../src/domain/approvals.js'
 import { createItem, getItem } from '../src/domain/items.js'
 import { dailySales, itemGp, salesSummary, shopToday } from '../src/domain/sales.js'
 import { postMovements } from '../src/domain/stock.js'
 import {
-  applyTillOps, closeRun, getSale, linePrice, listTills, roundCash, openRun, recordSale, recordTillEntry, runSummary, vatIn,
+  applyTillOps, closeRun, createTill, getSale, linePrice, listTills, roundCash, openRun, recordSale, recordTillEntry, runSummary, vatIn,
   type SaleInput,
 } from '../src/domain/till.js'
 import { purgeTenant } from '../src/domain/tenants.js'
@@ -157,17 +158,21 @@ describe('a full trading day', () => {
     const vitc = await item('DAY-2', { costPerPack: 50, packSize: 1, vatRate: 0 })   // zero-rated: retail 75.00
     const acc = await t.as((tx) => createAccount(tx, { accountNo: 'DAY', name: 'Clinic account' }))
     const runA = await newRun(200)
+    // Run B is on a second till, since a till has one open run at a time. Its second sale is discounted, so a supervisor approved it.
+    await t.as((tx) => createTill(tx, { code: 'T2', name: 'Till 2' }))
+    const till2 = (await t.as(listTills)).find((x) => x.code === 'T2')!.id
+    const approval = await t.as((tx) => issueApproval(tx, { approverId: t.userId, approverCode: t.staffCode, action: 'discount' }))
     const runB = randomUUID()
     const ops = [
-      { type: 'open_run' as const, data: { id: runB, tillId, openingFloat: 150, openedAt: new Date() } },
+      { type: 'open_run' as const, data: { id: runB, tillId: till2, openingFloat: 150, openedAt: new Date() } },
       // Run B: rung up offline and synced later.
       { type: 'sale' as const, data: sale(runB, [{ itemId: panado.id, qtyUnits: 20, listTotal: 34.2, lineTotal: 34.2 }], [{ tender: 'cash', amount: 34.2 }], { cashTendered: 50 }) },
-      { type: 'sale' as const, data: sale(runB, [{ itemId: vitc.id, qtyUnits: 2, listTotal: 150, lineTotal: 140 }], [{ tender: 'card', amount: 140, reference: '0042' }]) },
+      { type: 'sale' as const, data: sale(runB, [{ itemId: vitc.id, qtyUnits: 2, listTotal: 150, lineTotal: 140 }], [{ tender: 'card', amount: 140, reference: '0042' }], { approvalIds: [approval] }) },
       { type: 'till_entry' as const, data: { id: randomUUID(), runId: runB, kind: 'petty_cash' as const, tender: 'cash' as const, amount: 25, note: 'Milk', occurredAt: new Date() } },
     ]
-    const results = await t.as((tx) => applyTillOps(tx, tillId, ops, t.userId))
+    const results = await t.as((tx) => applyTillOps(tx, till2, ops, t.userId))
     expect(results.map((r) => r.status)).toEqual(['recorded', 'recorded', 'recorded', 'recorded'])
-    expect((await t.as((tx) => applyTillOps(tx, tillId, ops, t.userId))).map((r) => r.status)).toEqual(['duplicate', 'duplicate', 'duplicate', 'duplicate'])
+    expect((await t.as((tx) => applyTillOps(tx, till2, ops, t.userId))).map((r) => r.status)).toEqual(['duplicate', 'duplicate', 'duplicate', 'duplicate'])
 
     // Run A: a mix of tenders.
     await t.as(async (tx) => {
@@ -202,9 +207,13 @@ describe('a full trading day', () => {
     expect(sum.warnings.some((w) => w.includes(`Run ${rowA.run.runNo}`) && w.includes('after cash-up'))).toBe(true)
 
     // Only this test's runs, so the blocks can be checked to the thebe.
-    const only = await t.as((tx) => salesSummary(tx, { from: today, to: today, tillId }))
+    const only = await t.as((tx) => salesSummary(tx, { from: today, to: today }))
     const day = only.rows.filter((r) => r.run.id === runA || r.run.id === runB)
     expect(day.reduce((s, r) => s + r.run.sales.total, 0)).toBeCloseTo(34.2 + 140 + 17.1 + 75 + 51.3 + 150 + 17.1, 2)
+    // Asking for one till gives only that till's run.
+    const second = await t.as((tx) => salesSummary(tx, { from: today, to: today, tillId: till2 }))
+    expect(second.rows.map((r) => r.run.id)).toContain(runB)
+    expect(second.rows.map((r) => r.run.id)).not.toContain(runA)
 
     const daily = await t.as((tx) => dailySales(tx, { from: today, to: today }))
     expect(daily.rows).toHaveLength(1)
@@ -256,8 +265,10 @@ describe('till sync', () => {
     const good = sale(run, [{ itemId: i.id, qtyUnits: 10, listTotal: 34.2, lineTotal: 34.2 }], [{ tender: 'cash', amount: 34.2 }])
     const bad = sale(run, [{ itemId: i.id, qtyUnits: 10, listTotal: 34.2, lineTotal: 34.2 }], [{ tender: 'cash', amount: 3 }])
     const orphan = sale(randomUUID(), [{ itemId: i.id, qtyUnits: 10, listTotal: 34.2, lineTotal: 34.2 }], [{ tender: 'cash', amount: 34.2 }])
-    const res = await t.as((tx) => applyTillOps(tx, tillId, [
-      { type: 'open_run', data: { id: run, tillId, openingFloat: 0, openedAt: new Date() } },
+    await t.as((tx) => createTill(tx, { code: 'T3', name: 'Till 3' }))      // a till with nothing open, since a till has one open run
+    const till3 = (await t.as(listTills)).find((x) => x.code === 'T3')!.id
+    const res = await t.as((tx) => applyTillOps(tx, till3, [
+      { type: 'open_run', data: { id: run, tillId: till3, openingFloat: 0, openedAt: new Date() } },
       { type: 'sale', data: bad },
       { type: 'sale', data: good },
       { type: 'sale', data: orphan },
@@ -266,6 +277,43 @@ describe('till sync', () => {
     expect(res[3].error).toMatch(/unknown till run/)
     const rejects = await t.as((tx) => tx`select error from till_rejects order by id`)
     expect(rejects.map((r) => r.error)).toEqual([expect.stringMatching(/don't add up/), expect.stringMatching(/unknown till run/)])
+  })
+
+  it('needs a supervisor approval for a discount and a refund, and uses each approval once', async () => {
+    const i = await item('APPR-1')
+    await t.as((tx) => createTill(tx, { code: 'T4', name: 'Till 4' }))
+    const till4 = (await t.as(listTills)).find((x) => x.code === 'T4')!.id
+    const run = randomUUID()
+    const line = (lineTotal: number) => [{ itemId: i.id, qtyUnits: 10, listTotal: 34.2, lineTotal }]
+    const issue = (action: 'discount' | 'price' | 'refund') => t.as((tx) => issueApproval(tx, { approverId: t.userId, approverCode: t.staffCode, action }))
+    const base = sale(run, line(34.2), [{ tender: 'cash', amount: 34.2 }])
+    const discounted = sale(run, line(30), [{ tender: 'cash', amount: 30 }])
+    const approved = sale(run, line(30), [{ tender: 'cash', amount: 30 }], { approvalIds: [await issue('discount')] })
+    const refundBody = { itemId: i.id, qtyUnits: -10, listTotal: -34.2, lineTotal: -34.2 }
+    const refundNone = sale(run, [refundBody], [{ tender: 'cash', amount: -34.2 }], { kind: 'refund', refundOf: base.id })
+    const refunded = sale(run, [refundBody], [{ tender: 'cash', amount: -34.2 }], { kind: 'refund', refundOf: base.id, approvalIds: [await issue('refund')] })
+    const reused = sale(run, line(30), [{ tender: 'cash', amount: 30 }], { approvalIds: approved.approvalIds })
+    const res = await t.as((tx) => applyTillOps(tx, till4, [
+      { type: 'open_run', data: { id: run, tillId: till4, openingFloat: 0, openedAt: new Date() } },
+      ...[base, discounted, approved, refundNone, refunded, reused].map((data) => ({ type: 'sale' as const, data })),
+    ], t.userId))
+    expect(res.map((r) => r.status)).toEqual(['recorded', 'recorded', 'rejected', 'recorded', 'rejected', 'recorded', 'rejected'])
+    for (const k of [2, 4, 6]) expect(res[k].error).toMatch(/no supervisor approval/)
+    // The refused sales left no stock movement or sale behind; they wait under till problems.
+    expect((await t.as((tx) => tx`select count(*)::int as n from sales where till_run_id = ${run}`))[0].n).toBe(3)
+  })
+
+  it('lets a till have one open run at a time, until it is cashed up', async () => {
+    await t.as((tx) => createTill(tx, { code: 'T5', name: 'Till 5' }))
+    const till5 = (await t.as(listTills)).find((x) => x.code === 'T5')!.id
+    const first = randomUUID()
+    const second = randomUUID()
+    const open = (id: string) => ({ type: 'open_run' as const, data: { id, tillId: till5, openingFloat: 0, openedAt: new Date() } })
+    const res = await t.as((tx) => applyTillOps(tx, till5, [open(first), open(second)], t.userId))
+    expect(res.map((r) => r.status)).toEqual(['recorded', 'rejected'])
+    expect(res[1].error).toMatch(/already has run/)
+    await t.as((tx) => closeRun(tx, first, { counted: { cash: 0, card: 0, cheque: 0 }, floatKept: 0 }))
+    expect((await t.as((tx) => applyTillOps(tx, till5, [open(second)], t.userId))).map((r) => r.status)).toEqual(['recorded'])
   })
 
   it('cannot see another pharmacy\'s sales', async () => {

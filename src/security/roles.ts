@@ -28,6 +28,7 @@ export const permissions = {
   'stock.adjust': 'Stock takes, stock adjustments and min/max levels',
   'stock.reports': 'Stock and sales reports',
   'till.use': 'Ring up sales and take payment for scripts at the till',
+  'till.approve': 'Approve discounts, price changes and refunds at the till with a staff code and second PIN',
   'cashup.own': 'Cash up a till run blind',
   'cashup.manage': 'See expected cash, manage tills and till problems',
   'accounts.view': 'See customer accounts',
@@ -53,12 +54,12 @@ const everyone: Permission[] = ['home.view', 'items.view', 'till.use', 'cashup.o
 
 export const rolePermissions: Record<Role, readonly Permission[]> = {
   assistant: everyone,
-  supervisor: [...everyone, 'items.edit', 'stock.receive', 'stock.adjust', 'stock.reports', 'cashup.manage', 'sales.view'],
+  supervisor: [...everyone, 'items.edit', 'stock.receive', 'stock.adjust', 'stock.reports', 'cashup.manage', 'sales.view', 'till.approve'],
   dispenser: [...everyone, 'stock.receive', 'rx.view', 'rx.capture', 'rx.dispense'],
   pharmacist: [...everyone, 'items.edit', 'stock.receive', 'stock.reports', 'accounts.manage', 'sales.view',
     'rx.view', 'rx.capture', 'rx.dispense', 'rx.override', 'rx.check', 'rx.reverse', 'rx.flags.remove', 'rx.reports', 'rx.settings'],
   manager: [...everyone, 'items.edit', 'stock.receive', 'stock.adjust', 'stock.reports', 'cashup.manage', 'accounts.manage',
-    'sales.view', 'rx.reports', 'rx.settings', 'settings.manage', 'users.manage', 'audit.view'],
+    'sales.view', 'rx.reports', 'rx.settings', 'settings.manage', 'users.manage', 'audit.view', 'till.approve'],
 }
 
 export function isRole(v: unknown): v is Role {

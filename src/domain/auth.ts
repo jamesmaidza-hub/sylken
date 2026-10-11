@@ -207,6 +207,25 @@ export async function verifySecondFactor(db: Sql, token: string, pin: string, me
   return promote(db, token, user, meta)
 }
 
+/**
+ * Check a supervisor's second PIN for an approval at the till. A wrong PIN counts towards the same lock as at login,
+ * so the till cannot be used to guess PINs. Returns whether the PIN was right.
+ */
+export async function verifyApproverPin(db: Sql, tenantId: string, userId: string, pin: string, meta: ClientMeta = {}): Promise<boolean> {
+  const [u] = await withTenant(db, tenantId, (tx) => tx`select second_pin_hash, locked_until from users where id = ${userId} and active`)
+  if (!u) return false
+  if (u.locked_until && new Date(u.locked_until) > new Date()) {
+    throw new DomainError('That login is locked after too many wrong tries. Try again later, or ask a manager to unlock it.', 'locked', 423)
+  }
+  const ok = !!u.second_pin_hash && (await verifyPassword(pin.trim(), u.second_pin_hash))
+  if (!ok) {
+    await recordFailure(db, tenantId, userId, 'approval_pin_failed', meta)
+    return false
+  }
+  await withTenant(db, tenantId, (tx) => tx`update users set failed_logins = 0 where id = ${userId}`)
+  return true
+}
+
 /** Whether the pending login still has to choose its second PIN. */
 export async function needsPinSetup(db: Sql, token: string): Promise<boolean> {
   const user = await pendingSession(db, token)

@@ -177,6 +177,7 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['GET', '/api/till/catalogue', 'till.use'],
   ['GET', '/api/till/scripts/:no', 'till.use'],
   ['POST', '/api/till/sync', 'till.use'],
+  ['POST', '/api/till/approve', 'till.use'],
 ]
 
 const table = new Map(routePermissions.map(([method, path, rule]) => [`${method} ${path}`, rule]))

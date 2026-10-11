@@ -6,8 +6,10 @@ import { getSettings } from '../domain/settings.js'
 import { postMovements } from '../domain/stock.js'
 import { scriptForTill } from '../domain/scripts.js'
 import { applyTillOps, drawerTenders, tenders, touchTill } from '../domain/till.js'
-import { staffWithCodes } from '../domain/users.js'
-import { run, type Env } from './app.js'
+import { staffByCode, staffWithCodes } from '../domain/users.js'
+import { verifyApproverPin } from '../domain/auth.js'
+import { issueApproval } from '../domain/approvals.js'
+import { clientIp, run, type Env } from './app.js'
 
 /**
  * JSON API: item lookup, raw stock movements, and the till's catalogue and sync. Everything a
@@ -32,7 +34,7 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('sale'), userId: z.string().uuid().nullish(), data: z.object({
     id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['sale', 'refund']), refundOf: z.string().uuid().nullish(),
     occurredAt: when, accountId: z.string().uuid().nullish(), medicalAid: z.string().max(80).nullish(), memberNo: z.string().max(40).nullish(),
-    cashTendered: money.nullish(), rounding: money.nullish(), scriptId: z.string().uuid().nullish(), cashierCode: z.string().max(4).nullish(),
+    cashTendered: money.nullish(), rounding: money.nullish(), scriptId: z.string().uuid().nullish(), cashierCode: z.string().max(4).nullish(), approvalIds: z.array(z.string().uuid()).max(10).nullish(),
     lines: z.array(z.object({ itemId: z.string().uuid(), qtyUnits: z.number().int(), listTotal: money, lineTotal: money,
       scriptLineId: z.string().uuid().nullish() })).max(500),
     payments: z.array(z.object({ tender: z.enum(tenders), amount: money, reference: z.string().max(60).nullish() })).max(10),
@@ -106,6 +108,29 @@ export function api() {
       }
     })
     return c.json(data)
+  })
+
+  /**
+   * A supervisor approves a discount, a price change or a refund with their staff code and second PIN. This needs the
+   * server, so these cannot be approved on a till that is offline. The approval id goes back with the sale.
+   */
+  r.post('/till/approve', async (c) => {
+    const parsed = z.object({
+      code: z.string().max(4), pin: z.string().max(20), action: z.enum(['discount', 'price', 'refund']),
+      note: z.string().max(200).nullish(), cashierCode: z.string().max(4).nullish(),
+    }).safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) throw new DomainError('type the supervisor code and PIN')
+    const b = parsed.data
+    const user = c.get('user')
+    const who = await run(c, (tx) => staffByCode(tx, b.code, 'till.approve'))
+    if (!who) throw new DomainError(`${b.code.trim().toUpperCase() || 'That'} is not a supervisor code`, 'not_supervisor', 403)
+    const ok = await verifyApproverPin(c.get('db'), user.tenantId, who.id, b.pin, { ip: clientIp(c), userAgent: c.req.header('user-agent') })
+    if (!ok) throw new DomainError('Wrong second PIN', 'wrong_pin', 403)
+    const id = await run(c, (tx) => issueApproval(tx, {
+      approverId: who.id, approverCode: who.code, action: b.action, cashierId: user.userId,
+      detail: { note: b.note ?? null, cashierCode: b.cashierCode?.trim().toUpperCase() || null },
+    }))
+    return c.json({ id, approver: who.name, code: who.code })
   })
 
   /** A dispensed script, found by its number, so the till can take payment for it. Needs the server. */

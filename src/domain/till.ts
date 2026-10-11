@@ -5,6 +5,7 @@ import { audit } from './items.js'
 import { round2 } from './pricing.js'
 import { getSettings } from './settings.js'
 import { postMovements } from './stock.js'
+import { consumeApprovals } from './approvals.js'
 import { staffByCode } from './users.js'
 
 /**
@@ -128,6 +129,7 @@ export interface SaleInput {
   scriptId?: string | null     // paying for a dispensed script
   rounding?: number | null    // cash rounding taken on the sale: payments = lines + rounding
   cashierCode?: string | null // the 2-letter staff code the cashier typed for this sale
+  approvalIds?: string[] | null // supervisor approvals for a discount, price change or refund on this sale
   lines: SaleLineInput[]
   payments: PaymentInput[]
 }
@@ -475,6 +477,9 @@ export async function applyTillOps(tx: Tx, tillId: string, ops: TillOp[], sessio
       const res = await tx.savepoint(async (sp) => {
         if (op.type === 'open_run') {
           if (op.data.tillId !== tillId) throw new DomainError('run belongs to another till')
+          // A till has one open run at a time; the run that is open has to be cashed up first.
+          const [openRunNow] = await sp`select id, run_no from till_runs where till_id = ${op.data.tillId} and status = 'open' and id <> ${op.data.id}`
+          if (openRunNow) throw new DomainError(`this till already has run ${openRunNow.run_no} open; cash it up before opening another`, 'run_open', 409)
           const r = await openRun(sp, op.data, userId)
           return { id, status: r.recorded ? 'recorded' : 'duplicate', runNo: r.runNo } as OpResult
         }
@@ -485,6 +490,8 @@ export async function applyTillOps(tx: Tx, tillId: string, ops: TillOp[], sessio
           if (!op.data.cashierCode?.trim()) throw new DomainError('this sale has no cashier code')
           const who = await staffByCode(sp, op.data.cashierCode, 'till.use')
           const r = await recordSale(sp, op.data, { userId: who?.id ?? userId, deviceId })
+          // A cashier has no discount of their own: a discount, a price change or a refund needs a supervisor's approval.
+          if (r.recorded) await consumeApprovals(sp, op.data.id, op.data, op.data.approvalIds ?? [])
           return { id, status: r.recorded ? 'recorded' : 'duplicate', saleNo: r.saleNo } as OpResult
         }
         if (op.type === 'till_entry') {
