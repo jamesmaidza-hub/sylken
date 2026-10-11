@@ -22,6 +22,8 @@ export interface CompharmFiles {
   salesCsv?: string
   /** Also import item-list lines that appear in no other export (the supplier catalogue). Off by default. */
   includeCatalogue?: boolean
+  /** Add to a pharmacy that already has items: lines whose stock code is already in sylken are left alone. */
+  addToExisting?: boolean
 }
 
 export interface ImportIssue {
@@ -75,7 +77,7 @@ export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<Impo
   await primeTenant(tx)
   const settings = await getSettings(tx)
   const [{ n: existing }] = await tx`select count(*)::int as n from items`
-  if (existing > 0) throw new Error(`tenant already has ${existing} items; import only runs into an empty tenant`)
+  if (existing > 0 && !files.addToExisting) throw new Error(`tenant already has ${existing} items; import only runs into an empty tenant`)
 
   const issues: ImportIssue[] = []
   const sources: ImportReport['sources'] = {}
@@ -94,6 +96,11 @@ export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<Impo
       packSize: 1, packSizeKnown: false, schedule: null, bins: [], compharmStockId: null,
       status: 'active', reason: null, openingPacks: null, openingAsOf: null, minPacks: null, maxPacks: null, active: false, seen: false,
     })
+  }
+
+  if (files.addToExisting) {
+    const have = new Set((await tx`select stock_code from items`).map((r) => r.stock_code as string))
+    for (const code of [...drafts.keys()]) if (have.has(code)) drafts.delete(code)
   }
 
   const fill = (code: string, r: { description?: string; packSize?: number | null; bins?: string[] }) => {
@@ -227,8 +234,10 @@ export async function importCompharm(tx: Tx, files: CompharmFiles): Promise<Impo
   // 8. Bins
   const binNames = [...new Set(list.flatMap((d) => d.bins))]
   const binIds = new Map<string, string>()
-  if (binNames.length) {
-    const rows = await tx`insert into bins ${tx(binNames.map((name) => ({ tenant_id: tenantId(tx), name })) as any)} returning id, name`
+  if (files.addToExisting) for (const r of await tx`select id, name from bins`) binIds.set(r.name, r.id)
+  const newBins = binNames.filter((n) => !binIds.has(n))
+  if (newBins.length) {
+    const rows = await tx`insert into bins ${tx(newBins.map((name) => ({ tenant_id: tenantId(tx), name })) as any)} returning id, name`
     for (const r of rows) binIds.set(r.name, r.id)
   }
   const itemBins = list.flatMap((d) => [...new Set(d.bins)].map((b, i) => ({ item_id: idByCode.get(d.code)!, bin_id: binIds.get(b)!, position: i + 1 })))

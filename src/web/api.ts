@@ -6,6 +6,7 @@ import { getSettings } from '../domain/settings.js'
 import { postMovements } from '../domain/stock.js'
 import { scriptForTill } from '../domain/scripts.js'
 import { applyTillOps, drawerTenders, tenders, touchTill } from '../domain/till.js'
+import { staffWithCodes } from '../domain/users.js'
 import { run, type Env } from './app.js'
 
 /**
@@ -31,7 +32,7 @@ const opSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('sale'), userId: z.string().uuid().nullish(), data: z.object({
     id: z.string().uuid(), runId: z.string().uuid(), kind: z.enum(['sale', 'refund']), refundOf: z.string().uuid().nullish(),
     occurredAt: when, accountId: z.string().uuid().nullish(), medicalAid: z.string().max(80).nullish(), memberNo: z.string().max(40).nullish(),
-    cashTendered: money.nullish(), rounding: money.nullish(), scriptId: z.string().uuid().nullish(),
+    cashTendered: money.nullish(), rounding: money.nullish(), scriptId: z.string().uuid().nullish(), cashierCode: z.string().max(4).nullish(),
     lines: z.array(z.object({ itemId: z.string().uuid(), qtyUnits: z.number().int(), listTotal: money, lineTotal: money,
       scriptLineId: z.string().uuid().nullish() })).max(500),
     payments: z.array(z.object({ tender: z.enum(tenders), amount: money, reference: z.string().max(60).nullish() })).max(10),
@@ -88,7 +89,9 @@ export function api() {
                coalesce((select sum(e.amount) from account_entries e where e.account_id = a.id), 0) as balance
           from customer_accounts a where a.active order by a.name`
       const tills = await tx`select id, code, name from tills where active order by code`
+      const staff = await staffWithCodes(tx, 'till.use')
       return {
+        staff: staff.map((s) => ({ c: s.code, n: s.name })),
         tenant: { id: user.tenantId, name: user.tenantName, vatNumber: settings.vatNumber, receiptFooter: settings.receiptFooter, defaultFloat: settings.defaultFloat, cashRounding: settings.cashRounding, vatRate: settings.vatRate, buttons: settings.tillButtons },
         user: { id: user.userId, name: user.name, roles: user.roles },
         tills: tills.map((t) => ({ id: t.id, code: t.code, name: t.name })),

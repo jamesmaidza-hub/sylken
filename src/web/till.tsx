@@ -52,6 +52,8 @@ function tillPage(c: Ctx) {
             <a class="brand" href="/" title="Back office">sylken</a>
             <span id="till-label">Till</span>
             <span id="run-label" class="muted"></span>
+            <label class="cashier-code" title="Type your 2-letter staff code before each sale"><span>Cashier code</span>
+              <input id="cashier-code" maxlength={2} autocomplete="off" autocapitalize="characters" spellcheck={false} placeholder="XX" /></label>
             <span id="cashier" class="muted"></span>
             <span class="spacer"></span>
             <a class="nav" href="/items" title="Items and stock on hand (F2 in the back office)">Stock</a>

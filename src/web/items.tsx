@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { raw } from 'hono/html'
 import { num } from '../db/index.js'
+import { abcRanking, importedPeriods, slotSuggestions, SLOTTING, type AbcBasis, type AbcRow, type AbcSource, type SlotMove } from '../domain/abc.js'
 import { DomainError } from '../domain/errors.js'
 import { createItem, getItem, itemMargins, itemsByBin, listBins, moveItemsToBin, priceFor, searchItems, updateItem, type ItemInput } from '../domain/items.js'
 import { setMinMax } from '../domain/minmax.js'
@@ -9,7 +10,17 @@ import { getSettings } from '../domain/settings.js'
 import { adjustStock } from '../domain/stock.js'
 import { packsToUnits } from '../domain/units.js'
 import { back, can, page, run, type Env } from './app.js'
+import { download, formatHref, type Col } from './export.js'
 import { dateTime, money, pct, qty, StatusChip } from './layout.js'
+
+/** The three ways of looking at the item list: search, by bin, and ABC. */
+const ItemTabs = ({ on }: { on: 'list' | 'bins' | 'abc' }) => (
+  <nav class="tabs noprint">
+    <a href="/items" class={on === 'list' ? 'on' : ''}>List</a>
+    <a href="/items/bins" class={on === 'bins' ? 'on' : ''}>Bins</a>
+    <a href="/items/abc" class={on === 'abc' ? 'on' : ''}>ABC</a>
+  </nav>
+)
 
 /** Link to an item that keeps the search it was found by, so the results stay on screen above it. */
 const itemHref = (id: string, q: string, status?: string) =>
@@ -97,7 +108,8 @@ export function itemRoutes() {
     }
     return page(c, 'Items', (
       <>
-        <div class="row"><h1>Items</h1><span class="spacer" /><a class="btn secondary" href="/items/bins">🗄 List by bin</a><a class="btn" href="/items/new">New item</a></div>
+        <div class="row"><h1>Items</h1><span class="spacer" /><a class="btn" href="/items/new">New item</a></div>
+        <ItemTabs on="list" />
         <form class="row panel">
           <input name="q" value={q} data-search placeholder="Scan a barcode, or type words from the description  ( / )" style="flex:1" autofocus />
           <select name="status">
@@ -163,10 +175,10 @@ export function itemRoutes() {
     const back = `/items/bins?bin=${encodeURIComponent(bin)}&status=${encodeURIComponent(status ?? '')}`
     return page(c, 'Items by bin', (
       <>
-        <div class="row"><h1>Items by bin</h1><span class="spacer" />
-          <a class="btn secondary noprint" href="/items">Search items</a>
+        <div class="row"><h1>Items</h1><span class="spacer" />
           <button type="button" class="secondary noprint" id="bins-close">Close bin</button>
           <button type="button" class="noprint" id="bins-print">🖨 Print list</button></div>
+        <ItemTabs on="bins" />
         <form class="row panel noprint" id="bins-filter">
           <label class="f">Bin<select name="bin">
             <option value="">All bins</option>
@@ -225,10 +237,163 @@ export function itemRoutes() {
     const to = String(b.to ?? '')
     const n = await run(c, (tx) => moveItemsToBin(tx, moves, to, c.get('user').userId))
     const target = to.trim().toUpperCase()
-    const backTo = new URL(String(b.back ?? '').startsWith('/items/bins') ? String(b.back) : '/items/bins', 'http://x')
+    const backTo = new URL(/^\/items\/(bins|abc\/moves)/.test(String(b.back ?? '')) ? String(b.back) : '/items/bins', 'http://x')
     for (const k of ['open', 'ok', 'err']) backTo.searchParams.delete(k)
-    backTo.searchParams.set('open', target)
+    if (backTo.pathname === '/items/bins') backTo.searchParams.set('open', target)
     return back(c, `${backTo.pathname}${backTo.search}`, { ok: `Moved ${n} item${n === 1 ? '' : 's'} to bin ${target}` })
+  })
+
+  /** The ABC filter from the address, and the ranking it asks for. */
+  const loadAbc = async (c: Parameters<typeof run>[0]) => {
+    const q = c.req.query()
+    const basis: AbcBasis = q.basis === 'gp' ? 'gp' : 'sales'
+    // 20/30/50: the top 20% of items are A, the next 30% B, the remaining 50% C. aPct and bPct are cumulative cut-offs.
+    const aItems = Math.min(98, Math.max(1, Number(q.a) || 20))
+    const bItems = Math.min(99 - aItems, Math.max(1, Number(q.b) || 30))
+    const aPct = aItems
+    const bPct = aItems + bItems
+    const days = Math.min(730, Math.max(7, Math.round(Number(q.days) || 90)))
+    const { result, periods, source } = await run(c, async (tx) => {
+      const periods = await importedPeriods(tx)
+      const pick = (s: string | undefined): AbcSource | null =>
+        s === 'live' ? { kind: 'live', days } : periods.find((p) => p.label === s) ? { kind: 'imported', label: s! } : null
+      let source = pick(q.source)
+      let result = source ? await abcRanking(tx, { source, basis, aPct, bPct }) : null
+      if (!source) {
+        // First visit: the shop's own trading if there is any, otherwise the newest imported period.
+        source = { kind: 'live', days }
+        result = await abcRanking(tx, { source, basis, aPct, bPct })
+        if (!result.total && periods.length) {
+          source = { kind: 'imported', label: periods[0].label }
+          result = await abcRanking(tx, { source, basis, aPct, bPct })
+        }
+      }
+      return { result: result!, periods, source }
+    })
+    return { q, basis, aPct, bPct, aItems, bItems, days, result, periods, source }
+  }
+
+  r.get('/abc/moves', async (c) => {
+    const { basis, result, aItems, bItems } = await loadAbc(c)
+    const s = slotSuggestions(result.rows)
+    const mover = can(c, 'stock.adjust')
+    const here = `/items/abc/moves${new URL(c.req.url).search}`
+    const abcHref = `/items/abc${new URL(c.req.url).search}`
+    const total = [...s.forward.values()].reduce((n, l) => n + l.length, 0) + s.back.length
+    const table = (list: SlotMove[], formId: string) => (
+      <div class="wrap"><table>
+        <thead><tr>{mover && <th class="noprint"><input type="checkbox" class="tick-all" title="Tick all" checked /></th>}
+          <th>Code</th><th>Description</th><th>Now in</th><th>Why</th><th class="n">Sales excl</th></tr></thead>
+        <tbody>{list.map((m) => (
+          <tr data-href={`/items/${m.itemId}`}>
+            {mover && <td class="noprint"><input type="checkbox" name="move" form={formId} value={`${m.from ?? '-'}|${m.itemId}`} checked /></td>}
+            <td>{m.row.stockCode}</td><td><a href={`/items/${m.itemId}`}>{m.row.description}</a></td>
+            <td>{m.row.bins.length ? m.row.bins.map((b) => <span class="chip">{b}</span>) : <em class="muted">no bin</em>}</td>
+            <td>{m.reason}</td><td class="n">{money(m.row.sales)}</td>
+          </tr>
+        ))}</tbody>
+      </table></div>
+    )
+    return page(c, 'Suggested bin moves', (
+      <>
+        <div class="row"><h1>Items</h1><span class="spacer" /><a class="btn noprint" href="/items/new">New item</a></div>
+        <ItemTabs on="abc" />
+        <div class="row"><h2 style="margin:12px 0">Suggested bin moves</h2><span class="spacer" /><a class="btn secondary noprint" href={abcHref}>Back to ABC list</a></div>
+        <p class="muted">From the ABC ranking ({result.period}, by {basis === 'gp' ? 'gross profit' : 'sales value'}): split {aItems}/{bItems}/{100 - aItems - bItems} by item count: class A belongs in {SLOTTING.A}, class B in {SLOTTING.B}, and class C should not
+          take up either. {s.ok} ranked items are already right and {s.locked} sit in a bin that is never moved ({SLOTTING.locked.join(', ')}). Nothing moves until you press the button; only the shelf changes, stock on hand stays the same.</p>
+        {total === 0 && <p class="panel">Nothing to move: every ranked item is already on the right shelf.</p>}
+        {[...s.forward.entries()].map(([to, list], n) => (
+          <details class="bin-group" open>
+            <summary><span class="bin-name">Move to {to}</span> <span class="muted">{list.length} item{list.length === 1 ? '' : 's'}</span></summary>
+            {mover && <form method="post" action="/items/bins/move" class="row panel noprint move-bar" id={`slot-${n}`}>
+              <input type="hidden" name="back" value={here} /><input type="hidden" name="to" value={to} />
+              <b>Untick any you do not want to move</b><button>Move ticked to {to}</button></form>}
+            {table(list, `slot-${n}`)}
+          </details>
+        ))}
+        {s.back.length > 0 && (
+          <details class="bin-group" open>
+            <summary><span class="bin-name">Move out of {SLOTTING.A} / {SLOTTING.B}</span> <span class="muted">{s.back.length} class C item{s.back.length === 1 ? '' : 's'}</span></summary>
+            {mover && <form method="post" action="/items/bins/move" class="row panel noprint move-bar" id="slot-back">
+              <input type="hidden" name="back" value={here} />
+              <label class="row" style="gap:6px">to bin<input name="to" list="bin-names" required autocomplete="off" placeholder="e.g. TABLETSA" style="width:160px;text-transform:uppercase" /></label>
+              <button>Move ticked</button><span class="hint">Pick the back shelf for these slow sellers.</span></form>}
+            {table(s.back, 'slot-back')}
+          </details>
+        )}
+        <script>{raw(`document.addEventListener('change',function(e){var t=e.target;if(t.classList&&t.classList.contains('tick-all'))t.closest('table').querySelectorAll('input[name=move]').forEach(function(x){x.checked=t.checked})})`)}</script>
+      </>
+    ))
+  })
+
+  r.get('/abc', async (c) => {
+    const { q, basis, aItems, bItems, days, result, periods, source } = await loadAbc(c)
+    const cls = (['A', 'B', 'C', '-'] as const).find((k) => k === q.cls) ?? 'A'
+    const shown = result.rows.filter((r) => r.cls === cls)
+    const classHref = (k: string) => { const p = new URLSearchParams(new URL(c.req.url).search); p.delete('format'); p.set('cls', k); return `?${p}` }
+    const cols: Col<AbcRow>[] = [
+      { h: 'Rank', v: (r) => r.rank }, { h: 'Class', v: (r) => r.cls }, { h: 'Stock code', v: (r) => r.stockCode }, { h: 'Description', v: (r) => r.description },
+      { h: 'Pack size', v: (r) => r.packSize, fmt: 'int' }, { h: 'On hand (packs)', v: (r) => Math.round((r.onHandUnits / r.packSize) * 1000) / 1000, fmt: 'qty' },
+      { h: 'Sold (packs)', v: (r) => Math.round((r.qtyUnits / r.packSize) * 1000) / 1000, fmt: 'qty' }, { h: 'Sales excl VAT', v: (r) => Math.round(r.sales * 100) / 100, fmt: 'money' },
+      { h: 'Cost', v: (r) => Math.round(r.cost * 100) / 100, fmt: 'money' }, { h: 'GP', v: (r) => Math.round(r.gp * 100) / 100, fmt: 'money' },
+      { h: 'Share %', v: (r) => Math.round(r.share * 100) / 100, fmt: 'pct' }, { h: 'Cumulative %', v: (r) => Math.round(r.cumulative * 100) / 100, fmt: 'pct' },
+      { h: 'Bins', v: (r) => r.bins.join(' ') },
+    ]
+    const file = await download(c, `abc-${basis}`, 'ABC list', cols, shown)
+    if (file) return file
+    const sourceValue = source.kind === 'live' ? 'live' : source.label
+    const basisWord = basis === 'gp' ? 'gross profit' : 'sales value (excl VAT)'
+    const mover = can(c, 'stock.adjust')
+    return page(c, 'ABC list', (
+      <>
+        <div class="row"><h1>Items</h1><span class="spacer" />
+          <a class="btn secondary noprint" href={`/items/abc/moves${new URL(c.req.url).search}`}>Suggested bin moves</a>
+          <a class="btn secondary noprint" href={formatHref(c, 'xlsx')}>Download Excel</a><a class="btn secondary noprint" href={formatHref(c, 'csv')}>Download CSV</a>
+          <a class="btn noprint" href="/items/new">New item</a></div>
+        <ItemTabs on="abc" />
+        <style>{raw('.abc-cls{display:inline-block;min-width:22px;text-align:center;border-radius:4px;font-weight:700;padding:1px 6px}.abc-A{background:#d9f2e3;color:#12643a}.abc-B{background:#fff1cc;color:#7a5600}.abc-C{background:#eceff3;color:#4b5563}.abc-x{color:#9aa1ab}.abc-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;margin:12px 0}.abc-sum .panel{margin:0}.abc-sum b{font-size:20px}')}</style>
+        <form class="row panel noprint" id="abc-filter">
+          <label class="f">Rank by<select name="basis"><option value="sales" selected={basis === 'sales'}>Sales value</option><option value="gp" selected={basis === 'gp'}>Gross profit</option></select></label>
+          <label class="f">Sales from<select name="source">
+            <option value="live" selected={source.kind === 'live'}>Our own trading</option>
+            {periods.map((p) => <option value={p.label} selected={source.kind === 'imported' && source.label === p.label}>Imported {p.from} to {p.to} ({p.items} items)</option>)}
+          </select></label>
+          <label class="f">Trading days<input name="days" type="number" min="7" max="730" value={days} style="width:80px" /></label>
+          <label class="f">A: top % of items<input name="a" type="number" min="1" max="98" value={aItems} style="width:70px" /></label>
+          <label class="f">B: next % of items<input name="b" type="number" min="1" max="98" value={bItems} style="width:70px" /></label>
+          <span class="muted" style="align-self:end;padding-bottom:8px">C: the other {100 - aItems - bItems}%</span>
+          <input type="hidden" name="cls" value={cls} />
+          <button class="secondary">Show</button>
+        </form>
+        <p class="muted">Ranked by {basisWord}, {result.period}. Total {money(result.total)}.</p>
+        <nav class="tabs noprint" id="abc-classes">
+          {(['A', 'B', 'C'] as const).map((k) => (
+            <a href={classHref(k)} class={cls === k ? 'on' : ''}><span class={`abc-cls abc-${k}`}>{k}</span> {result.counts[k]} item{result.counts[k] === 1 ? '' : 's'} · {result.shares[k].toFixed(0)}%</a>
+          ))}
+        </nav>
+        <p class="hint">{cls === 'A' ? `Class A: the top ${aItems}% of items by ${basis === 'gp' ? 'profit' : 'sales'}. They bring in ${result.shares.A.toFixed(1)}% of it. Keep them near the counter, count and order them often.`
+          : cls === 'B' ? `Class B: the next ${bItems}% of items, ${result.shares.B.toFixed(1)}% of ${basis === 'gp' ? 'profit' : 'sales'}. Normal checks.`
+          : cls === 'C' ? `Class C: the last ${100 - aItems - bItems}% of items, ${result.shares.C.toFixed(1)}% of ${basis === 'gp' ? 'profit' : 'sales'}. Keep stock lean and order as needed.`
+          : 'Items with no sales in this period.'}
+          {cls !== '-' ? <> <a href={classHref('-')}>{result.counts['-']} items had no sales in this period.</a></> : <> <a href={classHref('A')}>Back to class A.</a></>}</p>
+        <div class="wrap"><table>
+          <thead><tr><th class="n">#</th><th>Class</th><th>Code</th><th>Description</th><th class="n">Pack</th><th class="n">On hand</th><th class="n">Sold</th><th class="n">Sales excl</th><th class="n">GP</th><th class="n">Share</th><th class="n">Cum.</th><th>Bins</th></tr></thead>
+          <tbody>{shown.map((r) => (
+            <tr data-href={`/items/${r.itemId}`} class={r.cls === '-' ? 'dim' : ''}>
+              <td class="n">{r.rank ?? ''}</td>
+              <td><span class={`abc-cls ${r.cls === '-' ? 'abc-x' : `abc-${r.cls}`}`}>{r.cls === '-' ? '–' : r.cls}</span></td>
+              <td>{r.stockCode}</td><td><a href={`/items/${r.itemId}`}>{r.description || <em class="muted">no description</em>}</a></td>
+              <td class="n">{r.packSize}</td><td class={`n ${r.onHandUnits < 0 ? 'neg' : ''}`}>{qty(r.onHandUnits, r.packSize)}</td>
+              <td class="n">{r.qtyUnits ? qty(r.qtyUnits, r.packSize) : ''}</td><td class="n">{r.sales ? money(r.sales) : ''}</td><td class="n">{r.sales ? money(r.gp) : ''}</td>
+              <td class="n">{r.rank ? pct(r.share) : ''}</td><td class="n">{r.rank ? pct(r.cumulative) : ''}</td>
+              <td>{r.bins.map((b) => <span class="chip">{b}</span>)}</td>
+            </tr>
+          ))}</tbody>
+        </table></div>
+        {!shown.length && <p class="muted">No items here.</p>}
+        <p class="hint">Items that sold are ranked best first and split by how many there are: A the top {aItems}%, B the next {bItems}%, C the other {100 - aItems - bItems}%. The A items usually bring in about 80% of the {basis === 'gp' ? 'profit' : 'sales'} (the Pareto rule); the percentage on each tab shows what they actually did. Items with no sales are not ranked. Own trading counts till sales and dispensed scripts (a script paid at the till is counted once). {mover ? 'To move a shelf item, use the Bins tab.' : ''}</p>
+      </>
+    ))
   })
 
   r.get('/new', async (c) => {

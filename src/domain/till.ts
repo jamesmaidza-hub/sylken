@@ -5,6 +5,7 @@ import { audit } from './items.js'
 import { round2 } from './pricing.js'
 import { getSettings } from './settings.js'
 import { postMovements } from './stock.js'
+import { staffByCode } from './users.js'
 
 /**
  * The till: runs (drawer sessions), sales with split tenders, petty cash and account payments.
@@ -126,6 +127,7 @@ export interface SaleInput {
   cashTendered?: number | null
   scriptId?: string | null     // paying for a dispensed script
   rounding?: number | null    // cash rounding taken on the sale: payments = lines + rounding
+  cashierCode?: string | null // the 2-letter staff code the cashier typed for this sale
   lines: SaleLineInput[]
   payments: PaymentInput[]
 }
@@ -220,10 +222,11 @@ export async function recordSale(tx: Tx, s: SaleInput, opts: { userId?: string |
 
   await tx`
     insert into sales (id, tenant_id, sale_no, till_run_id, kind, refund_of, occurred_at, user_id, account_id, medical_aid, member_no,
-                       total, rounding, vat, cost, cash_tendered, change_given, late, script_id)
+                       total, rounding, vat, cost, cash_tendered, change_given, late, script_id, cashier_code)
     values (${s.id}, current_setting('app.tenant_id')::uuid, ${saleNo}, ${s.runId}, ${s.kind}, ${s.refundOf ?? null}, ${s.occurredAt},
             ${opts.userId ?? null}, ${s.accountId ?? null}, ${s.medicalAid?.trim() || null}, ${s.memberNo?.trim() || null},
-            ${total}, ${rounding}, ${vat}, ${Math.round(cost * 10000) / 10000}, ${cashTendered}, ${change}, ${late}, ${s.scriptId ?? null})`
+            ${total}, ${rounding}, ${vat}, ${Math.round(cost * 10000) / 10000}, ${cashTendered}, ${change}, ${late}, ${s.scriptId ?? null},
+            ${s.cashierCode?.trim().toUpperCase() || null})`
   for (const l of lines) {
     await tx`
       insert into sale_lines (tenant_id, sale_id, line_no, item_id, qty_units, list_total, line_total, vat_rate, line_vat, unit_cost, script_line_id)
@@ -264,7 +267,7 @@ export async function getSale(tx: Tx, id: string) {
   const payments = await tx`select * from sale_payments where sale_id = ${id} order by line_no`
   return {
     id: s.id as string, saleNo: s.sale_no as number, kind: s.kind as 'sale' | 'refund', refundOf: s.refund_of as string | null,
-    runNo: s.run_no as number, tillCode: s.till_code as string, occurredAt: s.occurred_at as Date, userName: s.user_name as string | null,
+    runNo: s.run_no as number, tillCode: s.till_code as string, occurredAt: s.occurred_at as Date, userName: s.cashier_code ? `${s.user_name ?? ''} (${s.cashier_code})`.trim() : (s.user_name as string | null),
     accountName: s.account_name as string | null, accountNo: s.account_no as string | null,
     medicalAid: s.medical_aid as string | null, memberNo: s.member_no as string | null,
     total: num(s.total), rounding: num(s.rounding), vat: num(s.vat), cost: num(s.cost), cashTendered: numOrNull(s.cash_tendered), change: numOrNull(s.change_given),
@@ -476,7 +479,12 @@ export async function applyTillOps(tx: Tx, tillId: string, ops: TillOp[], sessio
           return { id, status: r.recorded ? 'recorded' : 'duplicate', runNo: r.runNo } as OpResult
         }
         if (op.type === 'sale') {
-          const r = await recordSale(sp, op.data, { userId, deviceId })
+          // Every sale carries a cashier's staff code. A sale with none is refused (and kept under till problems).
+          // The sale is credited to the person the code belongs to; a code that was valid on the till but is
+          // unknown here (e.g. the login was since removed) still records the sale, under the till's login.
+          if (!op.data.cashierCode?.trim()) throw new DomainError('this sale has no cashier code')
+          const who = await staffByCode(sp, op.data.cashierCode, 'till.use')
+          const r = await recordSale(sp, op.data, { userId: who?.id ?? userId, deviceId })
           return { id, status: r.recorded ? 'recorded' : 'duplicate', saleNo: r.saleNo } as OpResult
         }
         if (op.type === 'till_entry') {

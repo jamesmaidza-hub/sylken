@@ -183,7 +183,7 @@ describe('1.17, 1.18 and 1.19 managing logins', () => {
   it('refuses short passwords and the email as password', async () => {
     const boss = await addUser(db, t.id, ['manager'])
     const cookie = await webLogin(app, boss.email, boss.password)
-    const add = (email: string, password: string) => app.request('/users', { method: 'POST', headers: { cookie, referer: 'http://x/users' }, body: new URLSearchParams({ name: 'Fake', email, password, role_assistant: 'on' }) })
+    const add = (email: string, password: string) => app.request('/users', { method: 'POST', headers: { cookie, referer: 'http://x/users' }, body: new URLSearchParams({ name: 'Fake', email, password, staffCode: 'FK', role_assistant: 'on' }) })
     expect(err(await add('short@example.test', 'short'))).toMatch(/at least 10 characters/)
     expect(err(await add('same-as-email@example.test', 'same-as-email@example.test'))).toMatch(/cannot be the email/)
   })

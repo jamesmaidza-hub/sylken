@@ -184,7 +184,7 @@ export async function listSales(tx: Tx, opts: { range?: DayRange; runId?: string
     where = tx`s.occurred_at >= ${start} and s.occurred_at < ${end}`
   }
   const rows = await tx`
-    select s.id, s.sale_no, s.kind, s.occurred_at, s.total, s.vat, s.late, r.run_no, t.code as till_code, u.name as user_name,
+    select s.id, s.sale_no, s.kind, s.occurred_at, s.total, s.vat, s.late, r.run_no, t.code as till_code, u.name as user_name, s.cashier_code,
            a.name as account_name, s.medical_aid,
            (select string_agg(p.tender, ', ' order by p.line_no) from sale_payments p where p.sale_id = s.id) as tenders,
            (select sum(l.list_total - l.line_total) from sale_lines l where l.sale_id = s.id) as discount
@@ -194,7 +194,7 @@ export async function listSales(tx: Tx, opts: { range?: DayRange; runId?: string
      order by s.occurred_at desc limit ${opts.limit ?? 500}`
   return rows.map((s) => ({
     id: s.id as string, saleNo: s.sale_no as number, kind: s.kind as string, occurredAt: s.occurred_at as Date, total: num(s.total),
-    vat: num(s.vat), late: s.late as boolean, runNo: s.run_no as number, tillCode: s.till_code as string, userName: s.user_name as string | null,
+    vat: num(s.vat), late: s.late as boolean, runNo: s.run_no as number, tillCode: s.till_code as string, userName: s.cashier_code ? `${s.user_name ?? ''} (${s.cashier_code})`.trim() : (s.user_name as string | null),
     accountName: s.account_name as string | null, medicalAid: s.medical_aid as string | null, tenders: s.tenders as string,
     discount: round2(num(s.discount)),
   }))

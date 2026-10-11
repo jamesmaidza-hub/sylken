@@ -48,7 +48,7 @@ describe('1.3 every route is in the permission table, and nothing else is', () =
 describe('1.3 the server refuses every route a role does not allow', () => {
   for (const role of roles) {
     it(`${role}: every forbidden route answers 403, every allowed screen opens`, async () => {
-      const who = { assistant: p.assistant, dispenser: p.dispenser, pharmacist: p.pharmacist, manager: p.manager }[role]
+      const who = { assistant: p.assistant, supervisor: p.supervisor, dispenser: p.dispenser, pharmacist: p.pharmacist, manager: p.manager }[role]
       const wrong: string[] = []
       for (const [method, path, rule] of routePermissions) {
         if (rule === 'public' || rule === 'pending') continue
@@ -70,8 +70,10 @@ describe('1.3 the server refuses every route a role does not allow', () => {
     expect(can(['dispenser'], 'rx.reverse')).toBe(false)
     expect(roles.filter((r) => can([r], 'rx.override'))).toEqual(['pharmacist'])
     expect(roles.filter((r) => can([r], 'rx.reverse'))).toEqual(['pharmacist'])
-    expect(roles.filter((r) => can([r], 'stock.adjust'))).toEqual(['manager'])
+    expect(roles.filter((r) => can([r], 'stock.adjust'))).toEqual(['supervisor', 'manager'])
     expect(roles.filter((r) => can([r], 'users.manage'))).toEqual(['manager'])
+    expect(can(['supervisor'], 'rx.view')).toBe(false)           // a supervisor runs the floor, not the dispensary
+    expect(can(['supervisor'], 'settings.manage')).toBe(false)
     expect(can(['pharmacist', 'manager'], 'users.manage')).toBe(true)
     expect(Object.keys(rolePermissions)).toEqual([...roles])
   })
@@ -140,7 +142,7 @@ describe('1.7 only managers adjust stock and manage users', () => {
     expect(await level()).toBe(100)
     await p.manager.post(`/items/${itemId}/adjust`, { units: '-5', reason: 'DAMAGED' })
     expect(await level()).toBe(95)
-    const add = { name: 'Fake Person', email: `fake-${randomUUID().slice(0, 6)}@example.test`, password: 'fake-pass-123', role_assistant: 'on' }
+    const add = { name: 'Fake Person', email: `fake-${randomUUID().slice(0, 6)}@example.test`, password: 'fake-pass-123', staffCode: 'FP', role_assistant: 'on' }
     expect((await p.pharmacist.post('/users', add)).status).toBe(403)
     expect((await p.manager.post('/users', add)).status).toBe(302)
     expect(await p.t.as(async (tx) => (await tx`select roles from users where email = ${add.email}`)[0].roles)).toEqual(['assistant'])

@@ -11,8 +11,9 @@ afterAll(async () => { await db.end() })
 async function loggedIn() {
   const t = await newTenant(db)
   const app = createApp(db)
-  const cookie = await webLogin(app, t.email, t.password)
-  const get = (path: string) => app.request(path, { headers: { cookie } })
+  // The owner is a pharmacist, so the dispensary also needs their 2-letter code, which the screens keep in a cookie.
+  const cookie = `${await webLogin(app, t.email, t.password)}; rx_code=${t.staffCode}`
+  const get =(path: string) => app.request(path, { headers: { cookie } })
   const post = (path: string, body: Record<string, string>) => app.request(path, { method: 'POST', headers: { cookie }, body: new URLSearchParams(body) })
   return { t, app, cookie, get, post }
 }
@@ -168,7 +169,7 @@ describe('web', () => {
     const now = new Date().toISOString()
     const body = JSON.stringify({ tillId, pending: 3, runIds: [runId], ops: [
       { type: 'open_run', userId: cat.user.id, data: { id: runId, tillId, openingFloat: 100, openedAt: now } },
-      { type: 'sale', userId: cat.user.id, data: { id: saleId, runId, kind: 'sale', occurredAt: now, cashTendered: 50,
+      { type: 'sale', userId: cat.user.id, data: { id: saleId, runId, kind: 'sale', occurredAt: now, cashTendered: 50, cashierCode: t.staffCode,
         lines: [{ itemId: item.id, qtyUnits: 24, listTotal: 17.1, lineTotal: 17.1 }], payments: [{ tender: 'cash', amount: 17.1 }] } },
       { type: 'sale', data: { id: 'not-a-uuid' } },
     ] })
@@ -192,7 +193,7 @@ describe('web', () => {
   })
 
   it('dispenses a script on screen, prints its labels and finds it from the till', async () => {
-    const { t, get, post } = await loggedIn()
+    const { t, app, cookie, get, post } = await loggedIn()
     const loc = (res: Response) => new URL(res.headers.get('location')!, 'http://x')
     await t.as((tx) => createItem(tx, { stockCode: 'AMX500', description: 'AMOXICILLIN 500MG CAPS', packSize: 15, sellLoose: true, costPerPack: 30 }))
     await t.as(async (tx) => {
@@ -208,6 +209,11 @@ describe('web', () => {
     const created = await post('/dispensary/patients', { surname: 'Mothibi', firstNames: 'Kagiso', medicalAidId: aidId, memberNo: '12345', sex: 'F' })
     const patientPath = loc(created).pathname
     const docId = (await (await get(patientPath)).text()).match(/<option value="([0-9a-f-]{36})">Dr K Molefe/)![1]
+    // Nothing in the dispensary opens without a real dispenser code.
+    const wrongCode = `${cookie.split(';')[0]}; rx_code=QQ`
+    const gated = await app.request('/dispensary', { headers: { cookie: wrongCode } })
+    expect(await gated.text()).toContain('Your 2-letter dispenser code')
+    expect((await app.request(`${patientPath}/scripts`, { method: 'POST', headers: { cookie: wrongCode }, body: new URLSearchParams({ rxDate: '2020-01-01' }) })).headers.get('location')).toMatch(/dispenser%20code%20first|dispenser\+code\+first/)
     const draft = await post(`${patientPath}/scripts`, { doctorId: docId, rxDate: new Date().toISOString().slice(0, 10) })
     const scriptPath = loc(draft).pathname
     await post('/settings/rx-buttons', { buttons: 'AMX500, Amoxil 500, teal' })

@@ -24,7 +24,7 @@ export async function newTenant(db: Sql, password = 'secret-pass-1') {
   const email = `${slug}@example.test`
   const id = await createTenant(db, { slug, name: `Pharmacy ${slug}`, owner: { email, name: 'Owner', password } })
   const [owner] = await withTenant(db, id, (tx) => tx`select id from users`)
-  return { id, slug, email, password, userId: owner.id as string, as: <T>(fn: (tx: Tx) => Promise<T>) => withTenant(db, id, fn) }
+  return { id, slug, email, password, staffCode: 'OW', userId: owner.id as string, as: <T>(fn: (tx: Tx) => Promise<T>) => withTenant(db, id, fn) }
 }
 
 // ---------------------------------------------------------------- logging in through the web app
@@ -53,12 +53,17 @@ export async function webLogin(app: { request: (path: string, init?: RequestInit
 }
 
 /** Another login in a test pharmacy, with the given roles. */
+let nextCode = 0
+/** The next unused 2-letter staff code: AA, AB, AC... (676 in all, plenty for a test run). */
+const testCode = () => { const n = nextCode++; return String.fromCharCode(65 + (Math.floor(n / 26) % 26), 65 + (n % 26)) }
+
 export async function addUser(db: Sql, tenantId: string, roles: Role[], name = roles.join('+')) {
   const email = `${name.replace(/\W/g, '')}-${randomUUID().slice(0, 6)}@example.test`
   const password = 'fake-pass-123'
+  const staffCode = testCode()
   const id = await withTenant(db, tenantId, async (tx) => {
     const [boss] = await tx`select id from users where 'manager' = any(roles) limit 1`
-    return createUser(tx, { email, name, roles, password }, boss.id)
+    return createUser(tx, { email, name, roles, password, staffCode }, boss.id)
   })
-  return { id, email, password }
+  return { id, email, password, staffCode }
 }

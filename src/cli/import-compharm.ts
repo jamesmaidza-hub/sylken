@@ -12,7 +12,7 @@ if (!a.tenant || !a.items) {
 const tenant = await tenantBySlug(sql, a.tenant)
 if (!tenant) throw new Error(`no tenant ${a.tenant}`)
 const started = Date.now()
-const report = await withTenant(sql, tenant.id, (tx) => importCompharm(tx, { itemList: a.items, minMax: a.minmax, usage: a.usage, salesCsv: a.sales, includeCatalogue: a.all === 'true' }))
+const report = await withTenant(sql, tenant.id, (tx) => importCompharm(tx, { itemList: a.items, minMax: a.minmax, usage: a.usage, salesCsv: a.sales, includeCatalogue: a.all === 'true', addToExisting: a.add === 'true' }))
 const { issues, ...summary } = report
 console.log(JSON.stringify(summary, null, 2))
 const byType: Record<string, number> = {}

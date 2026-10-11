@@ -6,7 +6,7 @@ import {
   addFlag, allergyHits, createPatient, expandDirections, familyOf, getPatient, saveDoctor, saveMedicalAid, searchPatients, updatePatient,
 } from '../src/domain/patients.js'
 import {
-  addLine, createDraft, discardDraft, dispenseScript, getScript, labelsFor, listOwed, parseIcd10, priceLine, register, removeLine,
+  addLine, amendScript, createDraft, discardDraft, dispenseScript, getScript, labelsFor, listOwed, parseIcd10, priceLine, register, removeLine,
   reverseScript, scriptBook, scriptForTill, setSupply, startRepeat, supplyOwed,
 } from '../src/domain/scripts.js'
 import { updateSettings } from '../src/domain/settings.js'
@@ -133,6 +133,28 @@ describe('dispensing a script', () => {
     expect(await t.as((tx) => listOwed(tx, { patientId: pid }))).toEqual([])
     expect((await t.as((tx) => labelsFor(tx, { supplyId })))[0]).toMatchObject({ qtyUnits: 10, note: 'Balance of owed item' })
     expect(await onHand(b.id)).toBe(35)
+  })
+
+  it('amends a dispensed script by reversing it and opening a corrected copy', async () => {
+    const a = await item('RX-AM1')
+    const pid = await member()
+    const sid = await t.as((tx) => createDraft(tx, { patientId: pid, doctorId, rxDate: today() }))
+    await t.as((tx) => addLine(tx, sid, { itemId: a.id, qtyUnits: 20, directions: '1T3D' }))
+    const { scriptNo } = await t.as((tx) => dispenseScript(tx, sid, {}, t.userId))
+    expect(await onHand(a.id)).toBe(80)
+    await expect(t.as((tx) => amendScript(tx, sid, '', t.userId))).rejects.toThrow(/say what/)
+
+    const fresh = await t.as((tx) => amendScript(tx, sid, 'wrong quantity', t.userId, 'ow'))
+    expect(await onHand(a.id)).toBe(100)                        // the stock came back
+    expect(await t.as((tx) => getScript(tx, sid))).toMatchObject({ status: 'reversed', reverseReason: 'Amended: wrong quantity' })
+    const copy = (await t.as((tx) => getScript(tx, fresh)))!
+    expect(copy).toMatchObject({ status: 'draft', initiatedCode: 'OW', note: `Amended from script ${scriptNo}` })
+    expect(copy.lines.map((l) => l.qtyUnits)).toEqual([20])
+
+    const again = await t.as((tx) => dispenseScript(tx, fresh, {}, t.userId))
+    expect(again.scriptNo).toBeGreaterThan(scriptNo)            // the corrected script gets its own number
+    expect(await onHand(a.id)).toBe(80)
+    await expect(t.as((tx) => amendScript(tx, sid, 'again', t.userId))).rejects.toThrow(/only a dispensed script/)
   })
 
   it('makes the pharmacist confirm allergies and alerts, and blocks short stock unless overridden', async () => {

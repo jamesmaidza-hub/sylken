@@ -44,6 +44,8 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['GET', '/items', 'items.view'],
   ['GET', '/items/new', 'items.edit'],
   ['GET', '/items/bins', 'items.view'],
+  ['GET', '/items/abc', 'items.view'],
+  ['GET', '/items/abc/moves', 'items.view'],
   ['POST', '/items/bins/move', 'stock.adjust'],
   ['POST', '/items', 'items.edit'],
   ['GET', '/items/:id', 'items.view'],
@@ -130,6 +132,8 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
 
   // Dispensary
   ['GET', '/dispensary', 'rx.view'],
+  ['POST', '/dispensary/code', 'rx.view'],
+  ['POST', '/dispensary/code/clear', 'rx.view'],
   ['GET', '/dispensary/patients/new', 'rx.capture'],
   ['POST', '/dispensary/patients', 'rx.capture'],
   ['GET', '/dispensary/patients/:id', 'rx.view'],
@@ -147,6 +151,7 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['POST', '/dispensary/scripts/:id/check', 'rx.check'],
   ['POST', '/dispensary/scripts/:id/discard', 'rx.capture'],
   ['POST', '/dispensary/scripts/:id/reverse', 'rx.reverse'],
+  ['POST', '/dispensary/scripts/:id/amend', 'rx.reverse'],
   ['POST', '/dispensary/scripts/:id/repeat', 'rx.capture'],
   ['GET', '/dispensary/scripts/:id/labels', 'rx.view'],
   ['GET', '/dispensary/supplies/:id/label', 'rx.view'],
