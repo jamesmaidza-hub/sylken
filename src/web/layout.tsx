@@ -18,20 +18,99 @@ export const date = (d: Date | string | null | undefined) =>
 export const dateTime = (d: Date | string | null | undefined) =>
   d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
 
-const nav: [string, string, string, Permission][] = [
-  ['F2', 'Stock', '/items', 'items.view'],
-  ['F3', 'Receive', '/receiving', 'stock.receive'],
-  ['F4', 'Stock take', '/stocktakes', 'stock.adjust'],
-  ['F5', 'Dispensary', '/dispensary', 'rx.view'],
-  ['F6', 'Order', '/reports/minmax', 'stock.reports'],
-  ['F7', 'Reports', '/reports', 'stock.reports'],
-  ['F8', 'Settings', '/settings', 'settings.manage'],
-  ['F9', 'Till', '/till/', 'till.use'],
-  ['F10', 'Cash-up', '/cashup', 'cashup.own'],
-  ['', 'Sales', '/sales', 'sales.view'],
-  ['', 'Accounts', '/accounts', 'accounts.view'],
-  ['', 'Users', '/users', 'users.manage'],
+type NavItem = [key: string, label: string, href: string, perm: Permission]
+
+/**
+ * Three main tabs, each with the related screens as a submenu under it. A tab only shows the screens
+ * the person's roles allow, and is hidden when none are. The F-keys below still go straight to a screen.
+ */
+const navGroups: { slug: string; label: string; hue: string; icon: string; items: NavItem[] }[] = [
+  { slug: 'stock', label: 'Stock', hue: '#0f8a77', icon: '📦', items: [
+    ['F2', 'Items', '/items', 'items.view'],
+    ['F3', 'Receive', '/receiving', 'stock.receive'],
+    ['F4', 'Stock take', '/stocktakes', 'stock.adjust'],
+    ['F6', 'Order', '/reports/minmax', 'stock.reports'],
+  ] },
+  { slug: 'dispensary', label: 'Dispensary', hue: '#3b6fe0', icon: '💊', items: [
+    ['F5', 'Find patient', '/dispensary', 'rx.view'],
+    ['', 'New patient', '/dispensary/patients/new', 'rx.capture'],
+    ['', 'Owed items', '/dispensary/owed', 'rx.view'],
+    ['', 'Script book', '/dispensary/scripts', 'rx.view'],
+    ['', 'Register', '/dispensary/register', 'rx.view'],
+    ['', 'Doctors', '/dispensary/doctors', 'rx.view'],
+  ] },
+  { slug: 'sales', label: 'Sales & admin', hue: '#d9650f', icon: '🧾', items: [
+    ['F9', 'Till', '/till/', 'till.use'],
+    ['F10', 'Cash-up', '/cashup', 'cashup.own'],
+    ['', 'Sales', '/sales', 'sales.view'],
+    ['', 'Accounts', '/accounts', 'accounts.view'],
+    ['F7', 'Reports', '/reports', 'stock.reports'],
+    ['F8', 'Settings', '/settings', 'settings.manage'],
+    ['', 'Users', '/users', 'users.manage'],
+  ] },
 ]
+const nav: NavItem[] = navGroups.flatMap((g) => g.items)
+
+/** What each screen is, for the big buttons on the home page. */
+const tileInfo: Record<string, [icon: string, blurb: string]> = {
+  '/items': ['📦', 'Find items, prices, stock on hand, bins and the ABC list'],
+  '/receiving': ['🚚', 'Book in supplier deliveries and free stock'],
+  '/stocktakes': ['🧮', 'Count the shelves and put right the differences'],
+  '/reports/minmax': ['🛒', 'What to order: items at or below their minimum'],
+  '/dispensary': ['🔍', 'Find a patient and start a script'],
+  '/dispensary/patients/new': ['👤', 'Add a new patient or member'],
+  '/dispensary/owed': ['🧾', 'Items still owed to patients'],
+  '/dispensary/scripts': ['📖', 'Every script dispensed, to reprint or amend'],
+  '/dispensary/register': ['🔒', 'Scheduled medicines register'],
+  '/dispensary/doctors': ['🩺', 'Doctors and their practice numbers'],
+  '/till/': ['💳', 'Ring up sales and take payment'],
+  '/cashup': ['💰', 'Count the drawer and close the till run'],
+  '/sales': ['📈', 'The sales journal'],
+  '/accounts': ['🏷️', 'Customer accounts and statements'],
+  '/reports': ['📊', 'Stock, sales and dispensing reports'],
+  '/settings': ['⚙️', 'Shop settings, prices and quick buttons'],
+  '/users': ['👥', 'Logins, roles and staff codes'],
+}
+
+/** Each main tab with only the screens this person's roles allow; a tab with none is left out. */
+function groupsFor(user: SessionUser) {
+  return navGroups
+    .map((g) => ({ ...g, items: g.items.filter(([, , , perm]) => can(user.roles, perm)) }))
+    .filter((g) => g.items.length)
+}
+
+/** The group a person may open by its address name (stock, dispensary, sales), or undefined. */
+export const groupFor = (user: SessionUser, slug: string) => groupsFor(user).find((g) => g.slug === slug)
+
+/** The group's second page: its submenu tabs only. */
+export const menuPath = (slug: string) => `/menu/${slug}`
+
+/** The home page: three big coloured tabs and nothing else. Each opens that group's submenu page. */
+export function Launcher(props: { user: SessionUser }) {
+  return (
+    <div class="home-tabs">{groupsFor(props.user).map((g) => (
+      <a class="home-tab" href={menuPath(g.slug)} style={`--hue:${g.hue}`}>
+        <span class="ico" aria-hidden="true">{g.icon}</span>{g.label}
+      </a>
+    ))}</div>
+  )
+}
+
+/** A group's second page: its submenu as medium tabs, each opening a function page. Null if the group is unknown or not allowed. */
+export function GroupMenu(props: { user: SessionUser; slug: string }) {
+  const g = groupFor(props.user, props.slug)
+  if (!g) return null
+  return (
+    <div style={`--hue:${g.hue}`}>
+      <div class="row"><a class="btn secondary" href="/">← Home</a><h1 style="margin:0"><span class="ico" aria-hidden="true">{g.icon}</span> {g.label}</h1></div>
+      <nav class="med-tabs" aria-label={`${g.label} screens`}>{g.items.map(([k, label, href]) => (
+        <a class="med-tab" href={href} title={tileInfo[href]?.[1]}>
+          <span class="ico" aria-hidden="true">{tileInfo[href]?.[0]}</span>{label}{k && <kbd>{k}</kbd>}
+        </a>
+      ))}</nav>
+    </div>
+  )
+}
 
 // An unattended screen logs itself out, so patient details are not left showing.
 const idleLock = `(()=>{let t;const reset=()=>{clearTimeout(t);t=setTimeout(()=>{location.href='/logout?idle=1'},${security.idleMinutes * 60_000})};
@@ -45,6 +124,20 @@ header{display:flex;gap:12px;align-items:center;padding:6px 16px;position:sticky
 header .brand{font-weight:700;color:var(--accent);text-decoration:none;font-size:16px}
 header nav{display:flex;gap:2px;flex-wrap:wrap}header nav a{color:var(--ink);text-decoration:none;padding:5px 8px;border-radius:6px;white-space:nowrap}
 header nav a:hover{background:var(--chip)}header nav a.on{background:var(--accent);color:var(--accent-ink)}header nav a.on kbd{background:transparent;color:inherit;border-color:currentColor;opacity:.8}kbd{font:11px ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-right:4px;color:var(--muted)}
+header nav.main-tabs{gap:6px}header nav.main-tabs a{font-weight:700;padding:7px 18px;border:2px solid var(--hue);background:color-mix(in srgb,var(--hue) 14%,var(--panel))}
+header nav.main-tabs a:hover{background:color-mix(in srgb,var(--hue) 30%,var(--panel))}header nav.main-tabs a.on{background:var(--hue);color:#fff}
+.home-tabs{display:flex;gap:12px;margin:8px 0 14px}
+.home-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;text-decoration:none;font:inherit;font-size:28px;font-weight:800;padding:56px 12px;border-radius:14px;border:3px solid var(--hue);background:color-mix(in srgb,var(--hue) 14%,var(--panel));color:var(--ink);cursor:pointer;transition:transform .08s}
+.home-tab .ico{font-size:32px;line-height:1}.home-tab:hover{transform:translateY(-2px);background:color-mix(in srgb,var(--hue) 28%,var(--panel))}
+.home-tab.on{background:var(--hue);color:#fff;box-shadow:0 6px 16px color-mix(in srgb,var(--hue) 40%,transparent)}
+.med-tabs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px;padding:12px;border-radius:12px;background:color-mix(in srgb,var(--hue) 9%,var(--panel));border:1px solid color-mix(in srgb,var(--hue) 35%,var(--line))}
+.med-tab{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;font-size:17px;font-weight:700;border-radius:10px;border:2px solid var(--hue);background:var(--panel);color:var(--ink);text-decoration:none}
+.med-tab .ico{font-size:20px;line-height:1}.med-tab:hover{background:var(--hue);color:#fff}.med-tab:hover kbd{background:transparent;color:#fff;border-color:#fff}
+@media (max-width:640px){.home-tabs{flex-direction:column}.home-tab{padding:18px 12px}}
+.sub-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:8px 16px;background:color-mix(in srgb,var(--hue) 10%,var(--bg));border-bottom:2px solid var(--hue)}
+.sub-tabs a{color:var(--ink);text-decoration:none;padding:7px 14px;border-radius:8px;white-space:nowrap;font-size:15px;font-weight:600;border:1px solid color-mix(in srgb,var(--hue) 45%,var(--line));background:var(--panel)}
+.sub-tabs a:hover{background:color-mix(in srgb,var(--hue) 22%,var(--panel))}.sub-tabs a.on{background:var(--hue);border-color:var(--hue);color:#fff}.sub-tabs a.on kbd{background:transparent;color:#fff;border-color:#fff}
+@media print{.sub-tabs{display:none}}
 header .who{margin-left:auto;color:var(--muted);font-size:13px;white-space:nowrap}header #touch-toggle{margin-left:auto}header #touch-toggle+.who{margin-left:4px}
 main{padding:16px;max-width:1200px;margin:0 auto}h1{font-size:20px;margin:4px 0 12px}h2{font-size:16px;margin:20px 0 8px}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-bottom:12px}
@@ -171,6 +264,14 @@ function current(path = '') {
 }
 
 export function Layout(props: { title: string; user?: SessionUser | null; path?: string; children?: Child; flash?: { ok?: string; err?: string } }) {
+  // Each main tab with only the screens this person may open, and the tab the current page belongs to.
+  const visible = props.user
+    ? navGroups.map((g) => ({ ...g, items: g.items.filter(([, , , perm]) => can(props.user!.roles, perm)) })).filter((g) => g.items.length)
+    : []
+  const here = current(props.path)
+  // On a group's own submenu page that group is the active tab; the submenu bar is only for the function pages.
+  const menuSlug = props.path?.startsWith('/menu/') ? props.path.slice('/menu/'.length).replace(/\/$/, '') : null
+  const active = menuSlug ? visible.find((g) => g.slug === menuSlug) : visible.find((g) => g.items.some(([, , href]) => href === here))
   return (
     <html lang="en">
       <head>
@@ -183,14 +284,21 @@ export function Layout(props: { title: string; user?: SessionUser | null; path?:
         {props.user && (
           <header>
             <a class="brand" href="/">sylken</a>
-            <nav>
-              {nav.filter(([, , , perm]) => can(props.user!.roles, perm)).map(([k, label, href]) => (
-                <a href={href} class={href === current(props.path) ? 'on' : ''}>{k && <kbd>{k}</kbd>}{label}</a>
+            <nav class="main-tabs">
+              {visible.map((g) => (
+                <a href={menuPath(g.slug)} class={g === active ? 'on' : ''} style={`--hue:${g.hue}`}>{g.icon} {g.label}</a>
               ))}
             </nav>
             <button type="button" id="touch-toggle" class="secondary" style="padding:4px 10px;font-size:13px" title="Bigger buttons for a touch screen">Touch screen</button>
             <span class="who" title={`${props.user.tenantName} · ${props.user.roles.map((r) => roleLabels[r]).join(', ')}`}><a href="/me">{props.user.name}</a> · <a href="/logout">Log out</a></span>
           </header>
+        )}
+        {props.user && active && !menuSlug && (
+          <nav class="sub-tabs" style={`--hue:${active.hue}`}>
+            {active.items.map(([k, label, href]) => (
+              <a href={href} class={href === here ? 'on' : ''}>{k && <kbd>{k}</kbd>}{label}</a>
+            ))}
+          </nav>
         )}
         <main>
           {props.flash?.err && <div class="msg err">{props.flash.err}</div>}

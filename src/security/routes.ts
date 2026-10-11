@@ -26,6 +26,7 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['POST', '/login/2fa/setup', 'pending'],
 
   ['GET', '/', 'home.view'],
+  ['GET', '/menu/:group', 'home.view'],
 
   // Your own login
   ['GET', '/me', 'self.manage'],

@@ -93,9 +93,13 @@ describe('1.4 counter assistants', () => {
   })
 
   it('does not see dispensary links in the menu', async () => {
-    const html = await (await p.assistant.get('/')).text()
-    expect(html).not.toContain('href="/dispensary"')
-    expect(html).toContain('href="/till/"')
+    const home = await (await p.assistant.get('/')).text()
+    expect(home).not.toContain('/menu/dispensary')
+    expect(home).toContain('/menu/sales')
+    const sales = await (await p.assistant.get('/menu/sales')).text()
+    expect(sales).toContain('href="/till/"')
+    expect(sales).not.toContain('href="/dispensary"')
+    expect((await p.assistant.get('/menu/dispensary')).status).toBe(404)
   })
 })
 
