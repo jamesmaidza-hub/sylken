@@ -90,7 +90,7 @@ export function api() {
       const tills = await tx`select id, code, name from tills where active order by code`
       return {
         tenant: { id: user.tenantId, name: user.tenantName, vatNumber: settings.vatNumber, receiptFooter: settings.receiptFooter, defaultFloat: settings.defaultFloat, cashRounding: settings.cashRounding, vatRate: settings.vatRate, buttons: settings.tillButtons },
-        user: { id: user.userId, name: user.name, role: user.role },
+        user: { id: user.userId, name: user.name, roles: user.roles },
         tills: tills.map((t) => ({ id: t.id, code: t.code, name: t.name })),
         accounts: accounts.map((a) => ({
           id: a.id, no: a.account_no, name: a.name, balance: Number(a.balance), limit: a.credit_limit === null ? null : Number(a.credit_limit),

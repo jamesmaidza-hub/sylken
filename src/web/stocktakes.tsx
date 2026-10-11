@@ -3,7 +3,7 @@ import { DomainError } from '../domain/errors.js'
 import { findByCode } from '../domain/items.js'
 import { cancelStockTake, postStockTake, recordCount, startStockTake, stockTakeSummary } from '../domain/stocktake.js'
 import { packsToUnits } from '../domain/units.js'
-import { back, page, requireRole, run, type Env } from './app.js'
+import { back, page, run, type Env } from './app.js'
 import { dateTime, money, qty } from './layout.js'
 
 export function stockTakeRoutes() {
@@ -111,7 +111,6 @@ export function stockTakeRoutes() {
   })
 
   r.post('/:id/post', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     const n = await run(c, (tx) => postStockTake(tx, c.req.param('id'), { zeroUncounted: b.zeroUncounted === 'on' }, c.get('user').userId))
     return back(c, `/stocktakes/${c.req.param('id')}`, { ok: `Posted. ${n} items adjusted.` })

@@ -1,9 +1,15 @@
 import { Hono, type Context } from 'hono'
-import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
+import { getCookie } from 'hono/cookie'
 import type { Sql, Tx } from '../db/index.js'
 import { num, withTenant } from '../db/index.js'
-import { login, logout, sessionUser, type SessionUser } from '../domain/auth.js'
+import { sessionFor, type SessionUser } from '../domain/auth.js'
 import { DomainError } from '../domain/errors.js'
+import { security } from '../security/config.js'
+import { RateLimiter } from '../security/ratelimit.js'
+import { can as roleCan, type Permission } from '../security/roles.js'
+import { guard } from '../security/routes.js'
+import { SESSION_COOKIE, loginRoutes } from './login.js'
+import { meRoutes, userRoutes } from './users.js'
 import { api } from './api.js'
 import { itemRoutes } from './items.js'
 import { Layout } from './layout.js'
@@ -19,10 +25,8 @@ import { dispensaryRoutes } from './dispensary.js'
 import * as reports from '../domain/reports.js'
 import { money } from './layout.js'
 
-export type Env = { Variables: { user: SessionUser; db: Sql } }
+export type Env = { Variables: { user: SessionUser; db: Sql; pending: boolean; loginLimiter: RateLimiter } }
 export type Ctx = Context<Env>
-
-const COOKIE = 'sylken_session'
 
 /** Run fn as the logged-in user's pharmacy. */
 export function run<T>(c: Ctx, fn: (tx: Tx) => Promise<T>): Promise<T> {
@@ -40,8 +44,27 @@ export function back(c: Ctx, path: string, msg: { ok?: string; err?: string }) {
   return c.redirect(`${path}${path.includes('?') ? '&' : '?'}${q}`)
 }
 
-export function requireRole(c: Ctx, roles: SessionUser['role'][]) {
-  if (!roles.includes(c.get('user').role)) throw new DomainError(`this needs a ${roles.join(' or ')} login`, 'forbidden', 403)
+/** Whether the logged-in user holds a permission; for deciding what a screen shows. The route guard does the enforcing. */
+export function can(c: Ctx, perm: Permission): boolean {
+  return roleCan(c.get('user').roles, perm)
+}
+
+/** Refuse unless the user holds perm: for checks inside a route that depend on what was posted. */
+export function requirePermission(c: Ctx, perm: Permission, why = 'You do not have permission to do that.') {
+  if (!can(c, perm)) throw new DomainError(why, 'forbidden', 403)
+}
+
+/**
+ * The caller's address, for the audit log and login rate limits. X-Forwarded-For is only
+ * believed when TRUST_PROXY is set (the app sits behind Caddy), otherwise anyone could fake it.
+ */
+export function clientIp(c: Context): string | null {
+  if (process.env.TRUST_PROXY) {
+    const fwd = c.req.header('x-forwarded-for')?.split(',').pop()?.trim()
+    if (fwd) return fwd
+  }
+  const env = c.env as { incoming?: { socket?: { remoteAddress?: string } } } | undefined
+  return env?.incoming?.socket?.remoteAddress ?? null
 }
 
 export function page(c: Ctx, title: string, body: any) {
@@ -51,51 +74,48 @@ export function page(c: Ctx, title: string, body: any) {
 export function createApp(db: Sql) {
   const app = new Hono<Env>()
 
-  app.use('*', async (c, next) => { c.set('db', db); await next() })
+  const loginLimiter = new RateLimiter(security.ipAttempts, security.ipWindowMinutes * 60_000)
+  app.use('*', async (c, next) => { c.set('db', db); c.set('loginLimiter', loginLimiter); await next() })
 
-  app.get('/health', (c) => c.text('ok'))
-
-  app.get('/login', (c) =>
-    c.html(
-      <Layout title="Log in" flash={{ err: c.req.query('err') }}>
-        <div class="panel" style="max-width:360px;margin:10vh auto">
-          <h1>sylken</h1>
-          <form method="post" action="/login" style="display:grid;gap:10px">
-            <label class="f">Email<input name="email" type="email" autofocus required autocomplete="username" /></label>
-            <label class="f">Password<input name="password" type="password" required autocomplete="current-password" /></label>
-            <button type="submit">Log in</button>
-          </form>
-        </div>
-      </Layout>,
-    ),
-  )
-
-  app.post('/login', async (c) => {
-    const body = await c.req.parseBody()
-    const token = await login(db, String(body.email ?? ''), String(body.password ?? ''))
-    if (!token) return c.redirect('/login?err=' + encodeURIComponent('Wrong email or password'))
-    setCookie(c, COOKIE, token, { httpOnly: true, sameSite: 'Strict', path: '/', secure: process.env.NODE_ENV === 'production', maxAge: 14 * 86400 })
-    return c.redirect('/')
-  })
-
-  app.get('/logout', async (c) => {
-    const token = getCookie(c, COOKIE)
-    if (token) await logout(db, token)
-    deleteCookie(c, COOKIE, { path: '/' })
-    return c.redirect('/login')
-  })
-
-  // Everything below needs a session (cookie for screens, bearer token for the API).
+  // Read the session, if any (cookie for screens, bearer token for the API). A till's
+  // background polling sends x-sylken-background so it doesn't keep an idle session alive.
   app.use('*', async (c, next) => {
     const bearer = c.req.header('authorization')?.match(/^Bearer (.+)$/)?.[1]
-    const token = bearer ?? getCookie(c, COOKIE)
-    const user = token ? await sessionUser(db, token) : null
-    if (!user) return c.req.path.startsWith('/api/') ? c.json({ error: 'not logged in' }, 401) : c.redirect('/login')
-    c.set('user', user)
+    const token = bearer ?? getCookie(c, SESSION_COOKIE)
+    const s = token ? await sessionFor(db, token, { touch: c.req.header('x-sylken-background') !== '1' }) : null
+    if (s) { c.set('user', s.user); c.set('pending', s.pending) }
     await next()
   })
 
+  // Every route's permission is checked here, from src/security/routes.ts. Unlisted routes are refused.
+  app.use('*', guard({
+    principal: (c) => {
+      const user = c.get('user') as SessionUser | undefined
+      return user ? { roles: user.roles, pending: !!c.get('pending') } : null
+    },
+    onDenied: (c, why) => {
+      const api = c.req.path.startsWith('/api/')
+      if (why === 'login') {
+        if (api) return c.json({ error: 'not logged in' }, 401)
+        return c.redirect(c.get('pending') ? '/login/2fa' : '/login')
+      }
+      if (api) return c.json({ error: 'forbidden' }, 403)
+      return c.html(<Layout title="Not allowed" user={c.get('user')} path={c.req.path}>
+        <h1>Not allowed</h1><p>Your login does not allow this. Ask a manager if you need it.</p><p><a href="/">Home</a></p></Layout>, 403)
+    },
+  }))
+
+  app.get('/health', (c) => c.text('ok'))
+  app.route('/', loginRoutes())
+
   app.onError((err, c) => {
+    if (err instanceof DomainError && err.status === 401) {
+      return c.req.path.startsWith('/api/') ? c.json({ error: err.message }, 401) : c.redirect('/login?err=' + encodeURIComponent(err.message))
+    }
+    if (err instanceof DomainError && err.status === 403 && !c.req.path.startsWith('/api/')) {
+      return c.html(<Layout title="Not allowed" user={c.get('user')} path={c.req.path}>
+        <h1>Not allowed</h1><p>{err.message}</p><p><a href="/">Home</a></p></Layout>, 403)
+    }
     if (err instanceof DomainError) {
       if (c.req.path.startsWith('/api/')) return c.json({ error: err.message, code: err.code }, err.status as any)
       const ref = c.req.header('referer')
@@ -142,6 +162,8 @@ export function createApp(db: Sql) {
   app.route('/dispensary', dispensaryRoutes())
   app.route('/', tillRoutes())
   app.route('/api', api())
+  app.route('/users', userRoutes())
+  app.route('/me', meRoutes())
 
   return app
 }

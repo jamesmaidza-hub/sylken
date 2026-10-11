@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { findByCode, repriceItems } from '../domain/items.js'
 import { buttonColors, getSettings, parseTillButtons, updateSettings } from '../domain/settings.js'
-import { back, page, requireRole, run, type Env } from './app.js'
+import { back, page, run, type Env } from './app.js'
 
 export function settingsRoutes() {
   const r = new Hono<Env>()
@@ -53,7 +53,6 @@ export function settingsRoutes() {
   })
 
   r.post('/', async (c) => {
-    requireRole(c, ['owner'])
     const b = await c.req.parseBody()
     await run(c, (tx) => updateSettings(tx, {
       vatRate: Number(b.vatPct) / 100,
@@ -73,7 +72,6 @@ export function settingsRoutes() {
   })
 
   r.post('/till-buttons', async (c) => {
-    requireRole(c, ['owner'])
     const b = await c.req.parseBody()
     const n = await run(c, async (tx) => {
       const buttons = await parseTillButtons(tx, String(b.buttons ?? ''), findByCode)
@@ -84,7 +82,6 @@ export function settingsRoutes() {
   })
 
   r.post('/rx-buttons', async (c) => {
-    requireRole(c, ['owner'])
     const b = await c.req.parseBody()
     const n = await run(c, async (tx) => {
       const buttons = await parseTillButtons(tx, String(b.buttons ?? ''), findByCode)
@@ -95,7 +92,6 @@ export function settingsRoutes() {
   })
 
   r.post('/reprice', async (c) => {
-    requireRole(c, ['owner'])
     const n = await run(c, async (tx) => {
       const ids = (await tx`select id from items where status = 'active'`).map((x) => x.id as string)
       return repriceItems(tx, ids, c.get('user').userId)

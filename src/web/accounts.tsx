@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { accountStatement, ageAnalysis, createAccount, listAccounts, postAccountEntry } from '../domain/accounts.js'
 import { DomainError } from '../domain/errors.js'
-import { back, page, requireRole, run, type Env } from './app.js'
+import { back, page, run, type Env } from './app.js'
 import { date, dateTime, money } from './layout.js'
 
 export function accountRoutes() {
@@ -35,7 +35,6 @@ export function accountRoutes() {
   })
 
   r.post('/', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     const limit = String(b.creditLimit ?? '').trim()
     const id = await run(c, (tx) => createAccount(tx, {
@@ -100,7 +99,6 @@ export function accountRoutes() {
   })
 
   r.post('/:id/entries', async (c) => {
-    requireRole(c, ['owner', 'pharmacist'])
     const b = await c.req.parseBody()
     const kind = b.kind === 'adjustment' ? 'adjustment' : 'payment'
     await run(c, (tx) => postAccountEntry(tx, c.req.param('id'), { kind, amount: Number(b.amount), note: String(b.note ?? '') }, c.get('user').userId))
