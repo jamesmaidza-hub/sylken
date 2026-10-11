@@ -198,16 +198,10 @@ const registerCols: Col<{ i: RegisterItem; e: RegisterItem['entries'][number] }>
 ]
 
 export function RxToolbar({ on, patientId }: { on?: string; patientId?: string }) {
+  // Find patient, New patient, Owed items, Script book, Register and Doctors are in the Dispensary menu at the top.
   const tools: [string, string, string, string][] = [
-    ['find', '🔍', 'Find patient', '/dispensary'],
-    ['new', '👤', 'New patient', '/dispensary/patients/new'],
     ...(patientId ? [['history', '📋', 'History', `/dispensary/patients/${patientId}#scripts`] as [string, string, string, string]] : []),
-    ['owed', '📦', 'Owed items', '/dispensary/owed'],
-    ['book', '📖', 'Script book', '/dispensary/scripts'],
-    ['register', '🔒', 'Register', '/dispensary/register'],
     ['reports', '📊', 'Reports', '/reports/rx'],
-    ['doctors', '🩺', 'Doctors', '/dispensary/doctors'],
-    ['till', '🧾', 'Till', '/till/'],
     ['settings', '⚙️', 'Settings', '/dispensary/settings'],
   ]
   return (

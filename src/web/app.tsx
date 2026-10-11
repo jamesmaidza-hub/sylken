@@ -12,7 +12,7 @@ import { SESSION_COOKIE, loginRoutes } from './login.js'
 import { meRoutes, userRoutes } from './users.js'
 import { api } from './api.js'
 import { itemRoutes } from './items.js'
-import { Layout } from './layout.js'
+import { GroupMenu, groupFor, Launcher, Layout } from './layout.js'
 import { receivingRoutes } from './receiving.js'
 import { reportRoutes } from './reports.js'
 import { settingsRoutes } from './settings.js'
@@ -126,29 +126,20 @@ export function createApp(db: Sql) {
     return c.text('Something went wrong. The error has been logged.', 500)
   })
 
-  app.get('/', async (c) => {
-    const { counts, value, negative } = await run(c, async (tx) => ({
-      counts: await reports.counts(tx),
-      value: await reports.stockValuation(tx),
-      negative: (await reports.negativeStock(tx)).length,
-    }))
+  app.get('/', (c) => {
+    // The launcher: three big tabs and nothing else. Each opens its own page of submenu tabs (/menu/:group).
     return page(c, 'Home', (
       <>
         <h1>{c.get('user').tenantName}</h1>
-        <form action="/items" class="row panel">
-          <input name="q" data-search placeholder="Scan a barcode or type an item name  ( / )" style="flex:1" autofocus />
-          <button>Find</button>
-        </form>
-        <div class="stats">
-          <a class="stat" href="/items"><b>{counts.active.toLocaleString()}</b><span>active items</span></a>
-          <a class="stat" href="/items?status=dormant"><b>{counts.dormant.toLocaleString()}</b><span>dormant (catalogue only)</span></a>
-          <a class="stat" href="/reports/quarantine"><b>{counts.quarantined.toLocaleString()}</b><span>quarantined, need fixing</span></a>
-          <a class="stat" href="/reports/negative"><b>{negative}</b><span>items with negative stock</span></a>
-          <a class="stat" href="/reports/valuation"><b>{money(value.costValue)}</b><span>stock at cost</span></a>
-          <a class="stat" href="/reports/valuation"><b>{money(value.retailValue)}</b><span>stock at retail</span></a>
-        </div>
+        <Launcher user={c.get('user')} />
       </>
     ))
+  })
+
+  // A group's second page: only its submenu tabs, each opening a function page.
+  app.get('/menu/:group', (c) => {
+    const group = groupFor(c.get('user'), c.req.param('group'))
+    return group ? page(c, group.label, <GroupMenu user={c.get('user')} slug={group.slug} />) : c.notFound()
   })
 
   app.route('/items', itemRoutes())
