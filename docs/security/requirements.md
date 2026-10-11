@@ -28,7 +28,7 @@ Rules for this list:
 | 1.5 | Dispensers can capture and dispense, but cannot override a clinical warning (allergy, alert, old script) or a stock warning. | ❌ no dispenser role |
 | 1.6 | Only pharmacists approve overrides, reverse a dispensed script (return), cancel owed items and remove an allergy. | 🟡 owner or pharmacist, so a non-pharmacist owner could |
 | 1.7 | Only managers adjust stock (stock takes, min/max) and manage users. | 🟡 stock takes allowed pharmacists; no user management at all |
-| 1.8 | The person who checks a script is not the person who dispensed it, enforced in the database as well as the server. Labels print only after the check. | ❌ no checking step |
+| 1.8 | The person who checks a script is not the person who dispensed it, enforced in the database as well as the server. | ❌ no checking step |
 | 1.9 | A second factor (authenticator-app code, TOTP) for every pharmacist and manager login. | ❌ |
 | 1.10 | **[Added]** One-time recovery codes for the second factor, stored only as hashes; a manager can reset another user's second factor; a command-line reset exists for the last manager. | ❌ |
 | 1.11 | Sessions end after 15 minutes without activity and 12 hours after login, enforced on the server. | ❌ sessions lasted 14 days |

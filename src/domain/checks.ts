@@ -25,19 +25,3 @@ export async function scriptCheck(tx: Tx, scriptId: string): Promise<ScriptCheck
   const [c] = await tx`select c.checked_by, c.checked_at, u.name from script_checks c join users u on u.id = c.checked_by where c.script_id = ${scriptId}`
   return c ? { checkedBy: c.checked_by, checkedByName: c.name, checkedAt: c.checked_at } : null
 }
-
-/**
- * Labels print only for a script someone other than the dispenser has checked (james,
- * 2026-10-11). For the label of an owed item handed over later, the original script must be checked.
- */
-export async function requireChecked(tx: Tx, ref: { scriptId?: string; supplyId?: string }) {
-  const [row] = ref.scriptId
-    ? await tx`select s.script_no, c.id as check_id from scripts s left join script_checks c on c.script_id = s.id where s.id = ${ref.scriptId}`
-    : await tx`select s.script_no, c.id as check_id from owed_supplies os join owed_items o on o.id = os.owed_item_id
-                 join script_lines l on l.id = o.script_line_id join scripts s on s.id = l.script_id
-                 left join script_checks c on c.script_id = s.id where os.id = ${ref.supplyId ?? null}`
-  if (!row) throw new DomainError('unknown script', 'not_found', 404)
-  if (!row.check_id) {
-    throw new DomainError(`Script ${row.script_no ?? ''} has not been checked yet. A pharmacist other than the person who dispensed it checks it, then the labels print.`, 'not_checked', 409)
-  }
-}

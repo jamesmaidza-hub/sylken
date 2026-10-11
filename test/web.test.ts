@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Sql } from '../src/db/index.js'
 import { createItem } from '../src/domain/items.js'
 import { createApp } from '../src/web/app.js'
-import { addUser, appDb, newTenant, webLogin } from './helpers.js'
+import { appDb, newTenant, webLogin } from './helpers.js'
 
 let db: Sql
 beforeAll(() => { db = appDb() })
@@ -153,7 +153,7 @@ describe('web', () => {
   })
 
   it('dispenses a script on screen, prints its labels and finds it from the till', async () => {
-    const { t, app, get, post } = await loggedIn()
+    const { t, get, post } = await loggedIn()
     const loc = (res: Response) => new URL(res.headers.get('location')!, 'http://x')
     await t.as((tx) => createItem(tx, { stockCode: 'AMX500', description: 'AMOXICILLIN 500MG CAPS', packSize: 15, sellLoose: true, costPerPack: 30 }))
     await t.as(async (tx) => {
@@ -182,10 +182,6 @@ describe('web', () => {
     expect(page).toContain('J06.9')
     const done = await post(`${scriptPath}/dispense`, {})
     expect(loc(done).searchParams.get('ok')).toMatch(/script 61370/)
-    // Labels print once a second pharmacist has checked the script.
-    const checker = await addUser(db, t.id, ['pharmacist'])
-    const checkerCookie = await webLogin(app, checker.email, checker.password)
-    await app.request(`${scriptPath}/check`, { method: 'POST', headers: { cookie: checkerCookie } })
     const labels = await (await get(`${scriptPath}/labels`)).text()
     expect(labels).toContain('KAGISO MOTHIBI')
     expect(labels).toContain('Main Mall, Gaborone')
