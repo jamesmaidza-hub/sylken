@@ -110,3 +110,21 @@ body.touch-mode .due b{font-size:40px}
 @media (max-width:900px){body.touch-mode main{grid-template-columns:1fr}}
 header a.nav{color:var(--ink);text-decoration:none;padding:5px 10px;border-radius:6px;background:var(--chip);font-size:14px}
 header a.nav:hover{background:color-mix(in srgb,var(--accent) 18%,var(--chip))}
+
+/*
+ * Green-outlined buttons: the touch action buttons and the payment tiles. They ease over to a solid green fill with
+ * white text when hovered (a mouse) or tapped (a finger), and stay that way while pressed. Void line and Void all keep
+ * their warning colours.
+ */
+:root{--go:#0d6b5e}
+.pad button.act:not(.warn):not(.bad),.tenders button{
+  background:var(--panel);color:var(--ink);border:2px solid var(--accent);border-radius:8px;
+  transition:background-color .18s ease,color .18s ease,border-color .18s ease,box-shadow .18s ease,transform .1s ease}
+.tenders button{padding:14px 10px;font-weight:600;font-size:16px}
+@media (hover:hover){
+  .pad button.act:not(.warn):not(.bad):hover,.tenders button:hover{background:var(--go);border-color:var(--go);color:#fff}
+}
+.pad button.act:not(.warn):not(.bad):active,.tenders button:active,.tenders button.on{background:var(--go);border-color:var(--go);color:#fff}
+.pad button.act:not(.warn):not(.bad):active,.tenders button:active{transform:scale(.97)}
+.tenders button kbd{color:inherit}
+@media (prefers-reduced-motion:reduce){.pad button.act,.tenders button{transition:none}}
