@@ -319,7 +319,7 @@ export async function auditLog(tx: Tx, range: DayRange, opts: { userId?: string;
        ${opts.entity ? tx`and l.entity = ${opts.entity}` : tx``}
      order by l.at desc, l.id desc limit 5000`
   return rows.map((r) => ({
-    at: r.at as Date, by: r.by_name as string | null, action: (r.action as string).replace(/_/g, ' '), entity: auditLabels[r.entity] ?? r.entity,
+    at: r.at as Date, by: r.by_name as string | null, action: (r.action as string).replace(/_/g, ' '), high: (r.detail as any)?.priority === 'high', entity: auditLabels[r.entity] ?? r.entity,
     entityId: r.entity_id as string | null, href: r.entity_id && auditHref[r.entity] ? auditHref[r.entity] + r.entity_id : undefined,
     detail: r.detail === null ? '' : JSON.stringify(r.detail).slice(0, 300),
   }))

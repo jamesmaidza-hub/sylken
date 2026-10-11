@@ -320,7 +320,8 @@ export function tillReportRoutes() {
     }))
     type R = (typeof rows)[number]
     const cols: ScreenCol<R>[] = [
-      { h: 'When', v: (x) => dateTime(x.at) }, { h: 'Who', v: (x) => x.by }, { h: 'Did', v: (x) => x.action },
+      { h: 'When', v: (x) => dateTime(x.at) }, { h: 'Who', v: (x) => x.by },
+      { h: 'Did', v: (x) => (x.high ? `HIGH PRIORITY: ${x.action}` : x.action), show: (x) => (x.high ? <b class="neg">⚠ {x.action} (high priority)</b> : x.action) },
       { h: 'To', v: (x) => x.entity, show: (x) => (x.href ? <a href={x.href}>{x.entity}</a> : x.entity) },
       { h: 'Details', v: (x) => x.detail, show: (x) => <code style="font-size:11px;word-break:break-all">{x.detail}</code> },
     ]
@@ -328,7 +329,7 @@ export function tillReportRoutes() {
     if (dl) return dl
     return page(c, 'Audit log', <Report c={c} title="Audit log" range={range} cols={cols} rows={rows}
       keep={[userId && `user=${userId}`, entity && `entity=${entity}`].filter(Boolean).join('&')}
-      intro="Changes made in the back office and dispensary, newest first: items, prices, patients, scripts, accounts, stock takes and cash-ups. Sales are in the sales journal."
+      intro="Changes made in the back office and dispensary, newest first: items, prices, patients, scripts, accounts, stock takes, cash-ups, cash drops and no-sales. No-sale drawer openings are marked high priority. Sales are in the sales journal."
       filters={<>
         <label class="f">Who<select name="user"><option value="">Everyone</option>{users.map((u: any) => <option value={u.id} selected={u.id === userId}>{u.name}</option>)}</select></label>
         <label class="f">What<select name="entity"><option value="">Everything</option>

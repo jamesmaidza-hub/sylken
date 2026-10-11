@@ -61,6 +61,7 @@ function tillPage(c: Ctx) {
             <a class="nav" href="/" title="Receiving, min/max ordering, reports, cash-up">Back office</a>
             <span id="net" class="net">…</span>
             <span id="pending" class="muted"></span>
+            <button id="cash-alert" type="button" class="cash-alert" hidden title="The drawer holds more cash than the shop's limit. Press F7 to record a cash drop.">⚠ Cash drop due</button>
             <button id="touch-toggle" type="button" class="secondary small" title="Switch between the keyboard layout and big buttons for a touch screen">Touch screen</button>
           </header>
           <div id="banner" class="banner" hidden></div>
@@ -97,11 +98,14 @@ function tillPage(c: Ctx) {
                   <button type="button" class="act" data-a="script">Script</button><button type="button" class="act" data-a="refund">Refund</button>
                   <button type="button" class="act" data-a="reprint">Reprint</button>
                   <button type="button" class="pay" data-a="pay">Pay</button>
+                  <button type="button" class="act" data-a="nosale">No sale</button><button type="button" class="act" data-a="drop">Cash drop</button>
                 </div>
               </div>
               <dl class="keys">
                 <dt>F5</dt><dd>Pay</dd>
                 <dt>F2</dt><dd>Script by number</dd>
+                <dt>F3</dt><dd>No sale (open the drawer, with a reason)</dd>
+                <dt>F7</dt><dd>Cash drop to the safe</dd>
                 <dt>F4</dt><dd>Quantity</dd>
                 <dt>F6</dt><dd>Change price</dd>
                 <dt>Del</dt><dd>Remove line</dd>

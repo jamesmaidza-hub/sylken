@@ -303,6 +303,46 @@ describe('till sync', () => {
     expect((await t.as((tx) => tx`select count(*)::int as n from sales where till_run_id = ${run}`))[0].n).toBe(3)
   })
 
+  it('takes a cash drop out of the cash the drawer should hold, and counts the no-sales', async () => {
+    await t.as((tx) => createTill(tx, { code: 'T6', name: 'Till 6' }))
+    const till6 = (await t.as(listTills)).find((x) => x.code === 'T6')!.id
+    const run = randomUUID()
+    const i = await item('DROP-1')
+    const entry = (extra: Record<string, unknown>) => ({ type: 'till_entry' as const, data: {
+      id: randomUUID(), runId: run, kind: 'cash_drop' as const, tender: 'cash' as const, amount: 100, note: 'Safe', cashierCode: 'ZZ', occurredAt: new Date(), ...extra } })
+    const res = await t.as((tx) => applyTillOps(tx, till6, [
+      { type: 'open_run', data: { id: run, tillId: till6, openingFloat: 200, openedAt: new Date() } },
+      { type: 'sale', data: sale(run, [{ itemId: i.id, qtyUnits: 20, listTotal: 68.4, lineTotal: 68.4 }], [{ tender: 'cash', amount: 68.4 }], { cashTendered: 100 }) },
+      entry({}),                                                              // 100 to the safe
+      entry({ note: '' }),                                                    // no one to give it to: refused
+      entry({ cashierCode: null }),                                           // no cashier code: refused
+      entry({ kind: 'no_sale', amount: 0, reason: 'change', note: null }),    // a no-sale with a reason
+      entry({ kind: 'no_sale', amount: 0, reason: 'other', note: '' }),       // "other" needs details: refused
+      entry({ kind: 'no_sale', amount: 0, reason: null }),                    // no reason: refused
+    ], t.userId))
+    expect(res.map((r) => r.status)).toEqual(['recorded', 'recorded', 'recorded', 'rejected', 'rejected', 'recorded', 'rejected', 'rejected'])
+    expect(res[3].error).toMatch(/who or where/)
+    expect(res[4].error).toMatch(/no cashier code/)
+    expect(res[6].error).toMatch(/say why/)
+    expect(res[7].error).toMatch(/give a reason/)
+
+    const sum = (await t.as((tx) => runSummary(tx, run)))!
+    expect(sum).toMatchObject({ cashDrops: 100, noSales: 1 })
+    // Opening float + cash takings - cash drops: 200 + 68.40 - 100
+    expect(sum.expected.cash).toBe(168.4)
+    // Counting that drawer exactly is balanced, so a drop is not a shortage.
+    const closed = await t.as((tx) => closeRun(tx, run, { counted: { cash: 168.4, card: 0, cheque: 0 }, floatKept: 168.4 }))
+    expect(closed.surplus).toBe(0)
+    // A no-sale is a high-priority line in the audit log; a cash drop is logged too.
+    const log = await t.as((tx) => tx`select action, detail from audit_log where entity = 'till_run' and entity_id = ${run} and action in ('no_sale', 'cash_drop') order by id`)
+    expect(log.map((l) => l.action)).toEqual(['cash_drop', 'no_sale'])
+    expect(log[1].detail).toMatchObject({ priority: 'high', reason: 'change', cashierCode: 'ZZ' })
+    // The shop's banked takings still include the dropped cash.
+    const today = shopToday('Africa/Gaborone')
+    const row = (await t.as((tx) => salesSummary(tx, { from: today, to: today, tillId: till6 }))).rows.find((r) => r.run.id === run)!
+    expect(row).toMatchObject({ cash: 68.4, counted: 68.4, surplus: 0 })
+  })
+
   it('lets a till have one open run at a time, until it is cashed up', async () => {
     await t.as((tx) => createTill(tx, { code: 'T5', name: 'Till 5' }))
     const till5 = (await t.as(listTills)).find((x) => x.code === 'T5')!.id

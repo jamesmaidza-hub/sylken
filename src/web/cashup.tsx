@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { DomainError } from '../domain/errors.js'
 import { listSales, salesSummary, shopToday } from '../domain/sales.js'
 import { getSettings } from '../domain/settings.js'
-import { closeRun, countedTenders, createTill, listTills, runSummary, tenderLabels, type Tender } from '../domain/till.js'
+import { closeRun, countedTenders, createTill, listTills, noSaleReasons, runSummary, tenderLabels, type NoSaleReason, type Tender } from '../domain/till.js'
 import { back, can, page, run, type Ctx, type Env } from './app.js'
 import { dateTime, money } from './layout.js'
 
@@ -174,6 +174,8 @@ export function cashupRoutes() {
           <div class="stat"><b>{s.sales.count}</b><span>sales{s.sales.refunds ? `, ${s.sales.refunds} refunds` : ''}</span></div>
           {!hide && <div class="stat"><b>{money(s.sales.total)}</b><span>takings incl VAT ({money(s.sales.vat)} VAT){s.sales.rounding !== 0 && `, cash rounding ${money(s.sales.rounding)}`}</span></div>}
           <div class="stat"><b>{money(s.pettyCash)}</b><span>petty cash paid out</span></div>
+          <div class="stat"><b>{money(s.cashDrops)}</b><span>cash dropped to the safe</span></div>
+          <div class="stat"><b class={s.noSales > 0 ? 'neg' : ''}>{s.noSales}</b><span>no-sale drawer opening{s.noSales === 1 ? '' : 's'}</span></div>
           {s.surplus !== null && <div class="stat"><b class={s.surplus < 0 ? 'neg' : s.surplus > 0 ? 'pos' : ''}>{money(s.surplus)}</b><span>{s.surplus < 0 ? 'short' : s.surplus > 0 ? 'over' : 'balanced'}</span></div>}
         </div>
         {!hide && (
@@ -222,13 +224,17 @@ export function cashupRoutes() {
         )}
         {entries.length > 0 && (
           <>
-            <h2>Petty cash and account payments</h2>
+            <h2>Drawer entries</h2>
             <div class="wrap"><table>
               <thead><tr><th>Time</th><th>What</th><th>Tender</th><th class="n">Amount</th><th>By</th></tr></thead>
               <tbody>{entries.map((e: any) => (
-                <tr><td>{dateTime(e.occurred_at)}</td>
-                  <td>{e.kind === 'petty_cash' ? `Petty cash: ${e.note}` : <>Payment from <a href={`/accounts/${e.account_id}`}>{e.account_name}</a></>}{e.late && <span class="neg"> (late)</span>}</td>
-                  <td>{tenderLabels[e.tender as Tender]}</td><td class="n">{money(Number(e.amount))}</td><td>{e.user_name}</td></tr>
+                <tr class={e.kind === 'no_sale' ? 'neg' : ''}><td>{dateTime(e.occurred_at)}</td>
+                  <td>{e.kind === 'petty_cash' ? `Petty cash: ${e.note}`
+                    : e.kind === 'cash_drop' ? `Cash drop to ${e.note}`
+                    : e.kind === 'no_sale' ? `No sale: ${noSaleReasons[e.reason as NoSaleReason] ?? e.reason}${e.note ? ` (${e.note})` : ''}`
+                    : <>Payment from <a href={`/accounts/${e.account_id}`}>{e.account_name}</a></>}{e.late && <span class="neg"> (late)</span>}</td>
+                  <td>{tenderLabels[e.tender as Tender]}</td><td class="n">{e.kind === 'no_sale' ? '' : money(Number(e.amount))}</td>
+                  <td>{e.user_name}{e.cashier_code && <span class="muted"> ({e.cashier_code})</span>}</td></tr>
               ))}</tbody>
             </table></div>
           </>
