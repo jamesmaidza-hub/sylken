@@ -110,3 +110,13 @@ body.touch-mode .due b{font-size:40px}
 @media (max-width:900px){body.touch-mode main{grid-template-columns:1fr}}
 header a.nav{color:var(--ink);text-decoration:none;padding:5px 10px;border-radius:6px;background:var(--chip);font-size:14px}
 header a.nav:hover{background:color-mix(in srgb,var(--accent) 18%,var(--chip))}
+/* Action buttons and payment tiles: green outline, turning solid green with white text when hovered or tapped (james, 2026-10-11). */
+.pad button.act:not(.warn):not(.bad),.tenders button,.box .quick button,.box .row button.secondary,header button.secondary{
+  background:var(--panel);color:var(--accent);border:2px solid var(--accent);font-weight:600;
+  transition:background-color .15s ease,color .15s ease,border-color .15s ease,transform .08s ease}
+.pad button.act:not(.warn):not(.bad):hover,.pad button.act:not(.warn):not(.bad):active,
+.tenders button:hover,.tenders button:active,.tenders button.on,
+.box .quick button:hover,.box .quick button:active,.box .row button.secondary:hover,.box .row button.secondary:active,
+header button.secondary:hover,header button.secondary:active{background:var(--accent);color:var(--accent-ink);border-color:var(--accent)}
+.tenders button.on kbd,.tenders button:hover kbd{opacity:.9}
+@media (prefers-reduced-motion:reduce){.pad button,.tenders button,.box button,header button{transition:none}}
