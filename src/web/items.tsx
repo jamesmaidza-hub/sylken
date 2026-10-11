@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { raw } from 'hono/html'
 import { num } from '../db/index.js'
 import { DomainError } from '../domain/errors.js'
-import { createItem, getItem, itemMargins, priceFor, searchItems, updateItem, type ItemInput } from '../domain/items.js'
+import { createItem, getItem, itemMargins, itemsByBin, listBins, priceFor, searchItems, updateItem, type ItemInput } from '../domain/items.js'
 import { setMinMax } from '../domain/minmax.js'
 import { itemMovements } from '../domain/reports.js'
 import { getSettings } from '../domain/settings.js'
@@ -63,7 +63,7 @@ export function itemRoutes() {
     }
     return page(c, 'Items', (
       <>
-        <div class="row"><h1>Items</h1><span class="spacer" /><a class="btn" href="/items/new">New item</a></div>
+        <div class="row"><h1>Items</h1><span class="spacer" /><a class="btn secondary" href="/items/bins">🗄 List by bin</a><a class="btn" href="/items/new">New item</a></div>
         <form class="row panel">
           <input name="q" value={q} data-search placeholder="Scan a barcode, or type words from the description  ( / )" style="flex:1" autofocus />
           <select name="status">
@@ -117,6 +117,52 @@ export function itemRoutes() {
       <label>VAT % (blank = {(settings.vatRate * 100).toFixed(0)}%)<input name="vatPct" type="number" step="0.01" value={i?.vatRate != null ? (i.vatRate * 100).toFixed(2) : ''} /></label>
     </div>
   )
+
+  r.get('/bins', async (c) => {
+    const bin = c.req.query('bin') || ''
+    const status = c.req.query('status') || undefined
+    const { groups, bins, tz } = await run(c, async (tx) => ({ groups: await itemsByBin(tx, { bin, status }), bins: await listBins(tx), tz: (await getSettings(tx)).timezone }))
+    const count = groups.reduce((n, g) => n + g.items.length, 0)
+    return page(c, 'Items by bin', (
+      <>
+        <div class="row"><h1>Items by bin</h1><span class="spacer" />
+          <a class="btn secondary noprint" href="/items">Search items</a>
+          <button type="button" class="noprint" onclick="window.print()">🖨 Print list</button></div>
+        <form class="row panel noprint">
+          <label class="f">Bin<select name="bin" onchange="this.form.submit()">
+            <option value="">All bins</option>
+            {bins.map((b) => <option value={b} selected={b === bin.toUpperCase()}>{b}</option>)}
+            <option value="-" selected={bin === '-'}>No bin yet</option>
+          </select></label>
+          <label class="f">Status<select name="status" onchange="this.form.submit()">
+            <option value="">Active and quarantined</option>
+            {['active', 'dormant', 'quarantined', 'discontinued'].map((s) => <option value={s} selected={s === status}>{s}</option>)}
+          </select></label>
+          <button class="secondary">Show</button>
+          <span class="spacer" /><span class="muted">{count} item{count === 1 ? '' : 's'} on {groups.filter((g) => g.bin).length} bin{groups.filter((g) => g.bin).length === 1 ? '' : 's'}</span>
+        </form>
+        <p class="print-only">Printed {new Date().toLocaleString('en-GB', { timeZone: tz })}. Count each item and write the number in the Counted column.</p>
+        {groups.map((g) => (
+          <section class="bin-group">
+            <h2>{g.bin ? <>Bin {g.bin}</> : 'No bin yet'} <span class="muted" style="font-weight:400">· {g.items.length} item{g.items.length === 1 ? '' : 's'}</span></h2>
+            <div class="wrap"><table>
+              <thead><tr><th>Code</th><th>Description</th><th class="n">Pack</th><th class="n">On hand</th><th class="n noprint">Retail</th><th class="noprint">Status</th><th class="print-only counted">Counted</th></tr></thead>
+              <tbody>{g.items.map((i) => (
+                <tr data-href={`/items/${i.id}`}>
+                  <td>{i.stockCode}</td><td><a href={`/items/${i.id}`}>{i.description}</a>{i.bins.length > 1 && <span class="hint"> also in {i.bins.filter((b) => b !== g.bin).join(', ')}</span>}</td>
+                  <td class="n">{i.packSize}</td><td class={`n ${i.onHandUnits < 0 ? 'neg' : ''}`}>{qty(i.onHandUnits, i.packSize)}</td>
+                  <td class="n noprint">{money(i.retailPerPack)}</td><td class="noprint"><StatusChip status={i.status} reason={i.statusReason} /></td>
+                  <td class="print-only counted" />
+                </tr>
+              ))}</tbody>
+            </table></div>
+          </section>
+        ))}
+        {!groups.length && <p class="muted">No items here.</p>}
+        <p class="hint noprint">A bin is set on the item's General tab (Bins, comma separated). An item kept on two shelves shows under both.</p>
+      </>
+    ))
+  })
 
   r.get('/new', async (c) => {
     const settings = await run(c, getSettings)

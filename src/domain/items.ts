@@ -232,3 +232,33 @@ export async function audit(tx: Tx, userId: string | undefined | null, action: s
   await tx`insert into audit_log (tenant_id, user_id, action, entity, entity_id, detail)
            values (current_setting('app.tenant_id')::uuid, ${userId ?? null}, ${action}, ${entity}, ${entityId}, ${detail === undefined ? null : tx.json(detail as any)})`
 }
+
+/** Shelf names in use, in shelf order (A2 before A10). */
+export async function listBins(tx: Tx): Promise<string[]> {
+  const rows = await tx`select name from bins b where exists (select 1 from item_bins ib where ib.bin_id = b.id)`
+  return rows.map((r) => r.name as string).sort(binOrder)
+}
+
+export const binOrder = (a: string, b: string) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' })
+
+/**
+ * Items grouped under the bins (shelves) they sit in, for walking the shop or counting it.
+ * An item kept in two bins shows under both. Items in no bin come last, under null.
+ * bin: one shelf name, or '-' for items with no bin.
+ */
+export async function itemsByBin(tx: Tx, opts: { bin?: string; status?: string } = {}): Promise<{ bin: string | null; items: Item[] }[]> {
+  const statuses = opts.status ? [opts.status] : ['active', 'quarantined']
+  const bin = opts.bin?.trim().toUpperCase()
+  const items = (await tx`${select(tx)} where i.status = any(${statuses})
+      ${bin === '-' ? tx`and not exists (select 1 from item_bins ib where ib.item_id = i.id)`
+        : bin ? tx`and exists (select 1 from item_bins ib join bins bn on bn.id = ib.bin_id where ib.item_id = i.id and bn.name = ${bin})` : tx``}
+      order by i.description`).map(toItem)
+  const groups = new Map<string | null, Item[]>()
+  for (const it of items) {
+    const where = bin && bin !== '-' ? [bin] : it.bins.length ? it.bins : [null]
+    for (const b of where) { if (!groups.has(b)) groups.set(b, []); groups.get(b)!.push(it) }
+  }
+  return [...groups.entries()]
+    .sort(([a], [b]) => (a === null ? 1 : b === null ? -1 : binOrder(a, b)))
+    .map(([b, list]) => ({ bin: b, items: list }))
+}

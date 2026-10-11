@@ -74,6 +74,24 @@ describe('web', () => {
     expect(html.indexOf('ZZZ AMOXIL NEW')).toBeLessThan(html.indexOf('AAA AMOXIL OLD'))
   })
 
+  it('lists items under their bins in shelf order, with a filter and items with no bin last', async () => {
+    const { t, get } = await loggedIn()
+    await t.as(async (tx) => {
+      await createItem(tx, { stockCode: 'B10', description: 'TEN SHELF ITEM', costPerPack: 5, bins: ['a10'] })
+      await createItem(tx, { stockCode: 'B2', description: 'TWO SHELF ITEM', costPerPack: 5, bins: ['A2', 'A10'] })
+      await createItem(tx, { stockCode: 'B0', description: 'LOOSE ITEM', costPerPack: 5 })
+    })
+    const html = await (await get('/items/bins')).text()
+    expect(html.indexOf('Bin A2')).toBeGreaterThan(-1)
+    expect(html.indexOf('Bin A2')).toBeLessThan(html.indexOf('Bin A10'))
+    expect(html.indexOf('Bin A10')).toBeLessThan(html.lastIndexOf('No bin yet'))
+    const a10 = await (await get('/items/bins?bin=A10')).text()
+    expect(a10).toContain('TEN SHELF ITEM')
+    expect(a10).toContain('TWO SHELF ITEM')
+    expect(a10).not.toContain('LOOSE ITEM')
+    expect(await (await get('/items/bins?bin=-')).text()).toContain('LOOSE ITEM')
+  })
+
   it('saves till quick buttons and sends them to the till', async () => {
     const { t, get, post } = await loggedIn()
     await t.as((tx) => createItem(tx, { stockCode: 'W500', description: 'WATER 500ML', costPerPack: 3 }))

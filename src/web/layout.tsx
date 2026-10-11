@@ -99,6 +99,10 @@ tr.cur{outline:2px solid var(--accent);outline-offset:-2px;background:color-mix(
 .tabs{display:flex;gap:4px;margin:16px 0 0;border-bottom:1px solid var(--line)}.tabs a{padding:9px 18px;border-radius:6px 6px 0 0;color:var(--muted);text-decoration:none;font-weight:500}
 .tabs a.on{color:var(--ink);background:var(--panel);box-shadow:inset 0 -3px 0 var(--accent);font-weight:600}section.tab{margin-top:8px}section.tab>.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
 .grid label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}.items-form>.panel>.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:10px 16px;align-items:end}
+.print-only{display:none}.bin-group h2{margin-top:18px}
+@media print{header,.noprint,.toolbar,.msg{display:none!important}.print-only{display:block}th.print-only,td.print-only{display:table-cell}
+  body{background:#fff;color:#000;font-size:12px}main{max-width:none;padding:0}table{background:#fff}th,td{padding:3px 6px;border-bottom:1px solid #999}
+  td.counted,th.counted{width:90px;border-left:1px solid #999}.bin-group{break-inside:auto}.bin-group h2{break-after:avoid;font-size:14px}tr{break-inside:avoid}a{color:#000;text-decoration:none}.wrap{overflow:visible}}
 @media (max-width:980px){.rx-desk{grid-template-columns:1fr}}
 @media (max-width:640px){.rx-l{width:100%}.rx-info{margin-left:0}}
 /* Touch screen layout: bigger rows, fields and buttons; screens may add big-button panels (.touch-only). */

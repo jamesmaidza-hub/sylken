@@ -43,6 +43,7 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   // Items and stock
   ['GET', '/items', 'items.view'],
   ['GET', '/items/new', 'items.edit'],
+  ['GET', '/items/bins', 'items.view'],
   ['POST', '/items', 'items.edit'],
   ['GET', '/items/:id', 'items.view'],
   ['POST', '/items/:id', 'items.edit'],
