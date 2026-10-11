@@ -19,7 +19,7 @@ export interface UserRow {
 
 const row = (u: any): UserRow => ({
   id: u.id, email: u.email, name: u.name, roles: (u.roles as string[]).filter(isRole), active: u.active,
-  secondFactor: !!u.totp_enabled_at, lockedUntil: u.locked_until && new Date(u.locked_until) > new Date() ? u.locked_until : null, createdAt: u.created_at,
+  secondFactor: !!u.second_pin_hash, lockedUntil: u.locked_until && new Date(u.locked_until) > new Date() ? u.locked_until : null, createdAt: u.created_at,
 })
 
 export async function listUsers(tx: Tx): Promise<UserRow[]> {
@@ -112,10 +112,9 @@ export async function unlockUser(tx: Tx, id: string, by: string | null) {
   await audit(tx, by, 'unlock', 'user', id)
 }
 
-/** Clear someone's authenticator (lost phone). They set up a new one at their next login. */
+/** Clear someone's second PIN (forgotten). They choose a new one at their next login. */
 export async function resetSecondFactor(tx: Tx, id: string, by: string | null) {
-  await tx`update users set totp_secret = null, totp_enabled_at = null, totp_last_step = null where id = ${id}`
-  await tx`delete from recovery_codes where user_id = ${id}`
+  await tx`update users set second_pin_hash = null where id = ${id}`
   await endSessions(tx, id)
   await audit(tx, by, 'reset_second_factor', 'user', id)
 }

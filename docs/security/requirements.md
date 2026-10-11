@@ -29,8 +29,8 @@ Rules for this list:
 | 1.6 | Only pharmacists approve overrides, reverse a dispensed script (return), cancel owed items and remove an allergy. | 🟡 owner or pharmacist, so a non-pharmacist owner could |
 | 1.7 | Only managers adjust stock (stock takes, min/max) and manage users. | 🟡 stock takes allowed pharmacists; no user management at all |
 | 1.8 | The person who checks a script is not the person who dispensed it, enforced in the database as well as the server. | ❌ no checking step |
-| 1.9 | A second factor (authenticator-app code, TOTP) for every pharmacist and manager login. | ❌ |
-| 1.10 | **[Added]** One-time recovery codes for the second factor, stored only as hashes; a manager can reset another user's second factor; a command-line reset exists for the last manager. | ❌ |
+| 1.9 | A second factor for every pharmacist and manager login. **Changed by james (2026-10-11): a second PIN instead of an authenticator app.** A PIN is something the person knows, like the password, so it is **not a true second factor**. | ❌ |
+| 1.10 | **[Added]** A manager can reset another user's forgotten second PIN; a command-line reset exists for the last manager. | ❌ |
 | 1.11 | Sessions end after 15 minutes without activity and 12 hours after login, enforced on the server. | ❌ sessions lasted 14 days |
 | 1.12 | Screens lock (log out) in the browser after 15 minutes idle, so patient data is not left on an unattended screen. | ❌ |
 | 1.13 | After 5 wrong passwords or codes in a row an account is locked for 15 minutes; a manager can unlock it early. | ❌ |
@@ -53,7 +53,7 @@ Rules for this list:
 | 2.2 | A test proves pharmacy A can neither read nor change pharmacy B's data through the database, every web screen and the API (ids from B used while logged in to A). | 🟡 database-level test only |
 | 2.3 | **[Added]** A test fails the build if any table is added without tenant row-level security. | ❌ |
 | 2.4 | TLS on every connection from browsers; HTTP redirects to HTTPS; HSTS header. | 🟡 Caddy in `docker-compose.yml` gives TLS on a server; the shop PC runs plain HTTP on localhost 👤 |
-| 2.5 | Sensitive fields encrypted at rest with a key kept outside the database: patient ID/passport number, medical aid member number, phone, address, clinical notes, second-factor secrets, QuickBooks tokens. | ❌ |
+| 2.5 | Sensitive fields encrypted at rest with a key kept outside the database: patient ID/passport number, medical aid member number, phone, address, clinical notes, QuickBooks tokens. | ❌ |
 | 2.6 | Passwords stored only as salted, slow hashes. | ✅ scrypt with a random salt (`src/domain/auth.ts`); brief asked for argon2 or bcrypt, see open risks |
 | 2.7 | **[Added]** Hash cost raised to current guidance (scrypt N=2^17, r=8, p=1) and old hashes upgraded at next login. | ❌ N=2^14 |
 | 2.8 | No secrets, keys or passwords in code or git history; a scanner runs in CI. | 🟡 `.env` ignored; `.env.example` holds `change-me` placeholders; no scanner |
@@ -130,4 +130,4 @@ Rules for this list:
 - Backups actually run, leave the building, and restore (a restore drill at least every quarter).
 - An independent penetration test before a second pharmacy goes live.
 - Legal content of labels and the controlled-medicine register against Botswana's rules (the Medicines and Related Substances Act and BoMRA guidance), and the Data Protection Act 2018 duties (registration, breach notice, data held outside Botswana).
-- Staff practices: no shared logins, phones used for the second factor kept by their owners.
+- Staff practices: no shared logins, and nobody tells anyone their password or second PIN.

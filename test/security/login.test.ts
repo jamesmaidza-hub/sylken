@@ -1,11 +1,8 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import type { Sql } from '../../src/db/index.js'
 import { security } from '../../src/security/config.js'
-import { open } from '../../src/security/crypto.js'
-import { codeAt, stepAt, verifyCode } from '../../src/security/totp.js'
-import { base32Encode } from '../../src/security/totp.js'
 import { createApp } from '../../src/web/app.js'
-import { addUser, adminDb, appDb, newTenant, nextCode, webLogin } from '../helpers.js'
+import { addUser, adminDb, appDb, newTenant, TEST_PIN, webLogin } from '../helpers.js'
 
 // Requirements 1.9 to 1.19: docs/security/requirements.md
 
@@ -23,7 +20,7 @@ const where = (res: Response) => res.headers.get('location')
 const err = (res: Response) => new URL(where(res) ?? '/', 'http://x').searchParams.get('err') ?? ''
 const audit = (userId: string) => t.as(async (tx) => (await tx`select action from audit_log where entity = 'login' and entity_id = ${userId} order by id`).map((r) => r.action))
 
-describe('1.9 second factor for pharmacists and managers', () => {
+describe('1.9 second PIN for pharmacists and managers', () => {
   it('lets a counter assistant in with a password alone', async () => {
     const u = await addUser(db, t.id, ['assistant'])
     const res = await loginPost(u.email, u.password)
@@ -42,24 +39,23 @@ describe('1.9 second factor for pharmacists and managers', () => {
     expect((await app.request('/api/items', { headers: { authorization: `Bearer ${cookie.split('=')[1]}` } })).status).toBe(401)
   })
 
-  it('stores the authenticator secret encrypted, never in plain text', async () => {
+  it('stores the second PIN only as a salted hash', async () => {
     const u = await addUser(db, t.id, ['manager'])
     await webLogin(app, u.email, u.password)
-    const [row] = await t.as((tx) => tx`select totp_secret from users where id = ${u.id}`)
-    expect(row.totp_secret).toMatch(/^v1:/)
-    expect(open(row.totp_secret)).toMatch(/^[A-Z2-7]{32}$/)
-    expect(row.totp_secret).not.toContain(open(row.totp_secret))
+    const [row] = await t.as((tx) => tx`select second_pin_hash from users where id = ${u.id}`)
+    expect(row.second_pin_hash).toMatch(/^scrypt\$/)
+    expect(row.second_pin_hash).not.toContain(TEST_PIN)
   })
 
-  it('refuses a wrong code, and issues a new session token after the right one (1.16)', async () => {
+  it('refuses a wrong PIN, and issues a new session token after the right one (1.16)', async () => {
     const u = await addUser(db, t.id, ['pharmacist'])
-    await webLogin(app, u.email, u.password)           // sets up the authenticator
+    await webLogin(app, u.email, u.password)           // chooses the PIN
     const res = await loginPost(u.email, u.password)
     expect(where(res)).toBe('/login/2fa')
     const pending = cookieOf(res)
-    const bad = await app.request('/login/2fa', { method: 'POST', headers: { cookie: pending }, body: new URLSearchParams({ code: '000000' }) })
+    const bad = await app.request('/login/2fa', { method: 'POST', headers: { cookie: pending }, body: new URLSearchParams({ pin: '999999' }) })
     expect(where(bad)).toMatch(/^\/login\/2fa\?err=/)
-    const good = await app.request('/login/2fa', { method: 'POST', headers: { cookie: pending }, body: new URLSearchParams({ code: nextCode(u.email) }) })
+    const good = await app.request('/login/2fa', { method: 'POST', headers: { cookie: pending }, body: new URLSearchParams({ pin: TEST_PIN }) })
     expect(where(good)).toBe('/')
     const full = cookieOf(good)
     expect(full).not.toBe(pending)
@@ -67,43 +63,29 @@ describe('1.9 second factor for pharmacists and managers', () => {
     expect(where(await app.request('/', { headers: { cookie: pending } }))).toBe('/login')   // the pending token is gone
   })
 
-  it('never accepts the same code twice', async () => {
+  it('refuses weak PINs, a PIN that differs from its retyping, and the password as PIN', async () => {
+    const u = await addUser(db, t.id, ['pharmacist'])
+    const cookie = cookieOf(await loginPost(u.email, u.password))
+    const choose = (pin: string, again = pin) => app.request('/login/2fa/setup', { method: 'POST', headers: { cookie }, body: new URLSearchParams({ pin, again }) })
+    expect(err(await choose('12345'))).toMatch(/at least 6 digits/)
+    expect(err(await choose('111111'))).toMatch(/one digit repeated/)
+    expect(err(await choose('123456'))).toMatch(/a run like/)
+    expect(err(await choose('987654'))).toMatch(/a run like/)
+    expect(err(await choose('28491a'))).toMatch(/numbers only/)
+    expect(err(await choose('284917', '284918'))).toMatch(/not the same/)
+    const [row] = await t.as((tx) => tx`select second_pin_hash from users where id = ${u.id}`)
+    expect(row.second_pin_hash).toBeNull()
+    expect(where(await choose('284917'))).toMatch(/^\/\?ok=/)
+  })
+
+  it('lets a manager reset a forgotten PIN; the person chooses a new one at next login (1.10)', async () => {
     const u = await addUser(db, t.id, ['pharmacist'])
     await webLogin(app, u.email, u.password)
-    const code = nextCode(u.email)
-    const first = await loginPost(u.email, u.password)
-    expect(where(await app.request('/login/2fa', { method: 'POST', headers: { cookie: cookieOf(first) }, body: new URLSearchParams({ code }) }))).toBe('/')
-    const second = await loginPost(u.email, u.password)
-    expect(where(await app.request('/login/2fa', { method: 'POST', headers: { cookie: cookieOf(second) }, body: new URLSearchParams({ code }) }))).toMatch(/err=/)
-  })
-
-  it('accepts each recovery code once (1.10), and keeps only their hashes', async () => {
-    const u = await addUser(db, t.id, ['pharmacist'])
-    const first = await loginPost(u.email, u.password)
-    const page = await (await app.request('/login/2fa/setup', { headers: { cookie: cookieOf(first) } })).text()
-    const secret = page.match(/secret=([A-Z2-7]+)/)![1]
-    const done = await app.request('/login/2fa/setup', { method: 'POST', headers: { cookie: cookieOf(first) }, body: new URLSearchParams({ code: codeAt(secret, stepAt()) }) })
-    const codes = [...(await done.text()).matchAll(/\b([0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4})\b/g)].map((m) => m[1])
-    expect(codes.length).toBe(security.recoveryCodes)
-    const stored = await t.as((tx) => tx`select code_hash from recovery_codes where user_id = ${u.id}`)
-    expect(stored.length).toBe(security.recoveryCodes)
-    expect(stored.some((r) => codes.some((c) => r.code_hash.includes(c.replace(/-/g, ''))))).toBe(false)
-    const use = async () => {
-      const res = await loginPost(u.email, u.password)
-      return where(await app.request('/login/2fa', { method: 'POST', headers: { cookie: cookieOf(res) }, body: new URLSearchParams({ code: codes[0] }) }))
-    }
-    expect(await use()).toBe('/')
-    expect(await use()).toMatch(/err=/)
-    expect(await audit(u.id)).toContain('recovery_code_used')
-  })
-
-  it('matches the RFC 6238 test vector and allows one step of clock drift', () => {
-    const secret = base32Encode(Buffer.from('12345678901234567890'))
-    expect(codeAt(secret, Math.floor(59 / 30))).toBe('287082')            // RFC 6238 appendix B, 6 digits
-    expect(codeAt(secret, Math.floor(1111111109 / 30))).toBe('081804')
-    const now = Date.now()
-    expect(verifyCode(secret, codeAt(secret, stepAt(now) - 1), null, now)).not.toBeNull()
-    expect(verifyCode(secret, codeAt(secret, stepAt(now) - 3), null, now)).toBeNull()
+    const boss = await addUser(db, t.id, ['manager'])
+    const bossCookie = await webLogin(app, boss.email, boss.password)
+    await app.request(`/users/${u.id}/reset-2fa`, { method: 'POST', headers: { cookie: bossCookie } })
+    expect(where(await loginPost(u.email, u.password))).toBe('/login/2fa/setup')
+    expect((await t.as((tx) => tx`select action from audit_log where entity = 'user' and entity_id = ${u.id}`)).map((r) => r.action)).toContain('reset_second_factor')
   })
 })
 
@@ -120,12 +102,12 @@ describe('1.13 lockout after repeated failures', () => {
     expect(where(await loginPost(u.email, u.password))).toBe('/')
   })
 
-  it('counts wrong second-step codes towards the same lock', async () => {
+  it('counts wrong second PINs towards the same lock', async () => {
     const u = await addUser(db, t.id, ['manager'])
     await webLogin(app, u.email, u.password)
     for (let i = 0; i < security.maxFailures; i++) {
       const res = await loginPost(u.email, u.password)
-      await app.request('/login/2fa', { method: 'POST', headers: { cookie: cookieOf(res) }, body: new URLSearchParams({ code: '000000' }) })
+      await app.request('/login/2fa', { method: 'POST', headers: { cookie: cookieOf(res) }, body: new URLSearchParams({ pin: '999999' }) })
     }
     expect(where(await loginPost(u.email, u.password))).toMatch(/err=/)
   })
@@ -227,13 +209,15 @@ describe('1.17, 1.18 and 1.19 managing logins', () => {
   })
 })
 
-describe('second-step setup', () => {
-  it('cannot be redone once an authenticator is set up (an attacker with the password cannot swap in their own phone)', async () => {
+describe('choosing the second PIN', () => {
+  it('cannot replace an existing PIN, so someone with only the password cannot set their own', async () => {
     const u = await addUser(db, t.id, ['pharmacist'])
     await webLogin(app, u.email, u.password)
-    const res = await loginPost(u.email, u.password)
-    const setup = await app.request('/login/2fa/setup', { headers: { cookie: cookieOf(res) } })
-    expect(setup.status).not.toBe(200)
-    expect(await setup.text()).not.toMatch(/secret=/)
+    const cookie = cookieOf(await loginPost(u.email, u.password))
+    expect(where(await app.request('/login/2fa/setup', { headers: { cookie } }))).toBe('/login/2fa')
+    const res = await app.request('/login/2fa/setup', { method: 'POST', headers: { cookie }, body: new URLSearchParams({ pin: '502813', again: '502813' }) })
+    expect(err(res)).toMatch(/already set/)
+    const ok = await app.request('/login/2fa', { method: 'POST', headers: { cookie }, body: new URLSearchParams({ pin: TEST_PIN }) })
+    expect(where(ok)).toBe('/')
   })
 })

@@ -92,9 +92,9 @@ The import only runs into an empty pharmacy, and by default skips item-list line
 
 Each person has their own login with one or more roles: counter assistant, dispenser, pharmacist, manager. What each role may do is in `src/security/roles.ts`, and the permission every screen needs is in `src/security/routes.ts`; a screen missing from that table is refused. The first login made by `tenant:create` is pharmacist + manager. Managers add the others under **Users**.
 
-Pharmacists and managers set up an authenticator app (Google or Microsoft Authenticator) at their first login and get ten one-time recovery codes. If the only manager is locked out or loses their phone and codes, whoever runs the server can run `npm run user:reset -- --email you@example.com --unlock --reset-2fa`.
+Pharmacists and managers choose a second PIN at their first login and type it after the password every time; a manager resets a forgotten one. If the only manager is locked out or forgets their PIN, whoever runs the server can run `npm run user:reset -- --email you@example.com --unlock --reset-2fa`.
 
-Authenticator secrets are encrypted with a key kept outside the database: `SYLKEN_DATA_KEY` if set, otherwise `data/sylken.key`, created on first use. **Back that key up separately from the database**; without it nobody can log in with their authenticator, and everything encrypted with it later is lost. Security requirements and what is and isn't covered: `docs/security/requirements.md`.
+Sensitive fields will be encrypted with a key kept outside the database: `SYLKEN_DATA_KEY` if set, otherwise `data/sylken.key`, created on first use. **Back that key up separately from the database**; without it everything encrypted with it is lost. Security requirements and what is and isn't covered: `docs/security/requirements.md`.
 
 To deploy on a server: set `POSTGRES_PASSWORD`, `APP_DB_PASSWORD`, `SYLKEN_DATA_KEY` (`openssl rand -base64 32`) and `DOMAIN`, then `docker compose up -d` and `docker compose run --rm app npm run migrate`.
 

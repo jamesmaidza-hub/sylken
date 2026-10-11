@@ -32,7 +32,7 @@ function RoleTable() {
           <tr><td>{label}</td>{roles.map((r) => <td>{(rolePermissions[r] as readonly string[]).includes(p) ? '✓' : ''}</td>)}</tr>
         ))}</tbody>
       </table></div>
-      <p class="hint">Pharmacists and managers must use a code from an authenticator app at every login.</p>
+      <p class="hint">Pharmacists and managers also type a second PIN at every login.</p>
     </details>
   )
 }
@@ -46,7 +46,7 @@ export function userRoutes() {
       <>
         <h1>Users</h1>
         <div class="wrap"><table>
-          <thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Second step</th><th>Status</th></tr></thead>
+          <thead><tr><th>Name</th><th>Email</th><th>Roles</th><th>Second PIN</th><th>Status</th></tr></thead>
           <tbody>{users.map((u) => (
             <tr data-href={`/users/${u.id}`}><td><a href={`/users/${u.id}`}>{u.name}</a></td><td>{u.email}</td>
               <td>{u.roles.map((x) => roleLabels[x]).join(', ')}</td><td>{u.secondFactor ? 'set up' : ''}</td>
@@ -87,14 +87,14 @@ export function userRoutes() {
           <div><button>Save</button></div>
         </form>
         <p class="hint">Changing roles or switching a login off logs that person out everywhere.</p>
-        <h2>Password and second step</h2>
+        <h2>Password and second PIN</h2>
         <form method="post" action={`/users/${u.id}/password`} class="grid panel">
           <label>New password<input name="password" type="password" required minlength={security.minPasswordLength} autocomplete="new-password" /></label>
           <div><button>Set password</button></div>
         </form>
         <div class="row">
           {u.lockedUntil && <form method="post" action={`/users/${u.id}/unlock`}><button>Unlock now</button></form>}
-          {u.secondFactor && <form method="post" action={`/users/${u.id}/reset-2fa`}><button class="danger">Reset second step (lost phone)</button></form>}
+          {u.secondFactor && <form method="post" action={`/users/${u.id}/reset-2fa`}><button class="danger">Reset second PIN (forgotten)</button></form>}
         </div>
         <p class="muted">{u.lockedUntil ? `Locked after too many wrong tries, until ${dateTime(u.lockedUntil)}.` : ''}</p>
       </>
@@ -120,7 +120,7 @@ export function userRoutes() {
 
   r.post('/:id/reset-2fa', async (c) => {
     await run(c, (tx) => resetSecondFactor(tx, c.req.param('id'), c.get('user').userId))
-    return back(c, `/users/${c.req.param('id')}`, { ok: 'Second step reset. They set up a new one at their next login.' })
+    return back(c, `/users/${c.req.param('id')}`, { ok: 'Second PIN reset. They choose a new one at their next login.' })
   })
 
   return r

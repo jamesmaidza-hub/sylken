@@ -3,9 +3,8 @@ import { promisify } from 'node:util'
 import type { Sql, Tx } from '../db/index.js'
 import { withTenant } from '../db/index.js'
 import { security } from '../security/config.js'
-import { open, seal, tokenHash } from '../security/crypto.js'
+import { tokenHash } from '../security/crypto.js'
 import { isRole, needsSecondFactor, type Role } from '../security/roles.js'
-import { newSecret, verifyCode } from '../security/totp.js'
 import { DomainError } from './errors.js'
 
 const scrypt = promisify(scryptCb) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>
@@ -80,7 +79,7 @@ export async function login(db: Sql, email: string, password: string, meta: Clie
     await auditAuth(tx, u.user_id, pending ? 'password_ok' : 'login', meta)
   })
   const token = await createSession(db, u.user_id, u.tenant_id, pending, meta)
-  return { ok: true, token, next: !pending ? 'done' : u.totp_enabled ? 'second_factor' : 'set_up_second_factor' }
+  return { ok: true, token, next: !pending ? 'done' : u.pin_set ? 'second_factor' : 'set_up_second_factor' }
 }
 
 async function createSession(db: Sql, userId: string, tenantId: string, pending: boolean, meta: ClientMeta): Promise<string> {
@@ -185,24 +184,22 @@ async function promote(db: Sql, token: string, user: SessionUser, meta: ClientMe
   return createSession(db, user.userId, user.tenantId, false, meta)
 }
 
-/** Check the authenticator code (or a recovery code) for a pending login. Returns the new full session token, or null. */
-export async function verifySecondFactor(db: Sql, token: string, code: string, meta: ClientMeta = {}): Promise<string | null> {
+/** Why a second PIN is not acceptable, or null. */
+export function pinProblem(pin: string): string | null {
+  if (!/^\d+$/.test(pin)) return 'the PIN must be numbers only'
+  if (pin.length < security.minPinLength) return `use at least ${security.minPinLength} digits`
+  if (/^(\d)\1+$/.test(pin)) return 'the PIN cannot be one digit repeated'
+  const digits = [...pin].map(Number)
+  const step = digits[1] - digits[0]
+  if (Math.abs(step) === 1 && digits.every((d, i) => i === 0 || d - digits[i - 1] === step)) return 'the PIN cannot be a run like 123456'
+  return null
+}
+
+/** Check the second PIN for a pending login. Returns the new full session token, or null. */
+export async function verifySecondFactor(db: Sql, token: string, pin: string, meta: ClientMeta = {}): Promise<string | null> {
   const user = await pendingSession(db, token)
-  const ok = await withTenant(db, user.tenantId, async (tx) => {
-    const [u] = await tx`select totp_secret, totp_enabled_at, totp_last_step from users where id = ${user.userId} for update`
-    if (!u?.totp_secret || !u.totp_enabled_at) return false
-    const step = verifyCode(open(u.totp_secret), code, u.totp_last_step === null ? null : Number(u.totp_last_step))
-    if (step !== null) {
-      await tx`update users set totp_last_step = ${step} where id = ${user.userId}`
-      return true
-    }
-    const clean = code.replace(/[\s-]/g, '').toLowerCase()
-    if (clean.length < 10) return false
-    const [used] = await tx`update recovery_codes set used_at = now()
-                             where user_id = ${user.userId} and code_hash = ${tokenHash(clean)} and used_at is null returning 1`
-    if (used) await auditAuth(tx, user.userId, 'recovery_code_used', meta)
-    return !!used
-  })
+  const [u] = await withTenant(db, user.tenantId, (tx) => tx`select second_pin_hash from users where id = ${user.userId}`)
+  const ok = !!u?.second_pin_hash && (await verifyPassword(pin.trim(), u.second_pin_hash))
   if (!ok) {
     await recordFailure(db, user.tenantId, user.userId, 'second_factor_failed', meta)
     return null
@@ -210,49 +207,28 @@ export async function verifySecondFactor(db: Sql, token: string, code: string, m
   return promote(db, token, user, meta)
 }
 
-/** Start setting up an authenticator for a pending login that has none yet: the secret to show. */
-export async function beginSecondFactorSetup(db: Sql, token: string): Promise<{ secret: string; email: string }> {
+/** Whether the pending login still has to choose its second PIN. */
+export async function needsPinSetup(db: Sql, token: string): Promise<boolean> {
   const user = await pendingSession(db, token)
-  return withTenant(db, user.tenantId, async (tx) => {
-    const [u] = await tx`select totp_secret, totp_enabled_at from users where id = ${user.userId} for update`
-    if (u.totp_enabled_at) throw new DomainError('An authenticator is already set up for this login.', 'already_set_up', 409)
-    if (u.totp_secret) return { secret: open(u.totp_secret), email: user.email }
-    const secret = newSecret()
-    await tx`update users set totp_secret = ${seal(secret)} where id = ${user.userId}`
-    return { secret, email: user.email }
-  })
+  const [u] = await withTenant(db, user.tenantId, (tx) => tx`select second_pin_hash from users where id = ${user.userId}`)
+  return !u?.second_pin_hash
 }
 
 /**
- * Finish setting up: the first code from the app proves it holds the secret. Returns the new
- * full session token and the recovery codes, which are shown once and kept only as hashes.
+ * Choose the second PIN at first login (or after a manager reset it). Only a login with no PIN
+ * can do this, so someone who knows the password can't replace an existing PIN. Returns the new
+ * full session token.
  */
-export async function finishSecondFactorSetup(db: Sql, token: string, code: string, meta: ClientMeta = {}):
-  Promise<{ token: string; recoveryCodes: string[] } | null> {
+export async function setUpSecondPin(db: Sql, token: string, pin: string, again: string, meta: ClientMeta = {}): Promise<string> {
   const user = await pendingSession(db, token)
-  const codes = await withTenant(db, user.tenantId, async (tx) => {
-    const [u] = await tx`select totp_secret, totp_enabled_at from users where id = ${user.userId} for update`
-    if (!u.totp_secret || u.totp_enabled_at) return null
-    const step = verifyCode(open(u.totp_secret), code, null)
-    if (step === null) return null
-    await tx`update users set totp_enabled_at = now(), totp_last_step = ${step} where id = ${user.userId}`
-    const out = await newRecoveryCodes(tx, user.userId)
-    await auditAuth(tx, user.userId, 'second_factor_set_up', meta)
-    return out
+  const problem = pin !== again ? 'the two PINs are not the same' : pinProblem(pin)
+  if (problem) throw new DomainError(problem)
+  await withTenant(db, user.tenantId, async (tx) => {
+    const [u] = await tx`select second_pin_hash, password_hash from users where id = ${user.userId} for update`
+    if (u.second_pin_hash) throw new DomainError('A second PIN is already set for this login.', 'already_set_up', 409)
+    if (await verifyPassword(pin, u.password_hash)) throw new DomainError('the PIN cannot be the same as the password')
+    await tx`update users set second_pin_hash = ${await hashPassword(pin)} where id = ${user.userId}`
+    await auditAuth(tx, user.userId, 'second_pin_set', meta)
   })
-  if (!codes) {
-    await recordFailure(db, user.tenantId, user.userId, 'second_factor_failed', meta)
-    return null
-  }
-  return { token: await promote(db, token, user, meta), recoveryCodes: codes }
-}
-
-async function newRecoveryCodes(tx: Tx, userId: string): Promise<string[]> {
-  await tx`delete from recovery_codes where user_id = ${userId}`
-  const codes = Array.from({ length: security.recoveryCodes }, () => randomBytes(8).toString('hex').replace(/(.{4})(?=.)/g, '$1-'))
-  for (const c of codes) {
-    await tx`insert into recovery_codes (tenant_id, user_id, code_hash)
-             values (current_setting('app.tenant_id')::uuid, ${userId}, ${tokenHash(c.replace(/-/g, ''))})`
-  }
-  return codes
+  return promote(db, token, user, meta)
 }
