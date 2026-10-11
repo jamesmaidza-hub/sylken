@@ -95,7 +95,7 @@ export function api() {
       const staff = await staffWithCodes(tx, 'till.use')
       return {
         staff: staff.map((s) => ({ c: s.code, n: s.name })),
-        tenant: { id: user.tenantId, name: user.tenantName, vatNumber: settings.vatNumber, receiptFooter: settings.receiptFooter, defaultFloat: settings.defaultFloat, cashDropLimit: settings.cashDropLimit, cashRounding: settings.cashRounding, vatRate: settings.vatRate, buttons: settings.tillButtons },
+        tenant: { id: user.tenantId, name: user.tenantName, vatNumber: settings.vatNumber, receiptFooter: settings.receiptFooter, defaultFloat: settings.defaultFloat, cashDropLimit: settings.cashDropLimit, maxChange: settings.maxChange, cashRounding: settings.cashRounding, vatRate: settings.vatRate, buttons: settings.tillButtons },
         user: { id: user.userId, name: user.name, roles: user.roles },
         tills: tills.map((t) => ({ id: t.id, code: t.code, name: t.name })),
         accounts: accounts.map((a) => ({

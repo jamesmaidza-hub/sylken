@@ -425,6 +425,7 @@
     let cashTendered = 0
     let rounding = 0                                  // cash rounding taken, in the same direction as `due`
     const sc = cart.script
+    const maxChange = Number((cat && cat.tenant && cat.tenant.maxChange) || 0)     // the most change the shop allows on one sale
     const order = refund ? ['cash', 'card', 'eft', 'account', ...(sc && sc.medicalAid ? ['medical_aid'] : [])] : ['cash', 'card', 'cheque', 'eft', 'account', 'medical_aid']
     const preferAccount = sc ? sc.accountId : null
     if (sc) {
@@ -455,7 +456,7 @@
           const a = round2(num(f.amount.value))
           const owed = f.tender.value === 'cash' ? roundCash(left) : left
           if (!(a > 0)) out.innerHTML = ''
-          else if (a > owed && f.tender.value === 'cash' && !refund) out.innerHTML = `Change <b>${money(round2(a - owed))}</b>`
+          else if (a > owed && f.tender.value === 'cash' && !refund) out.innerHTML = `Change <b>${money(round2(a - owed))}</b>${maxChange > 0 && round2(a - owed) > maxChange ? ` <span class="err">more than the ${money(maxChange)} limit</span>` : ''}`
           else if (a < owed) out.innerHTML = `Still to ${refund ? 'refund' : 'pay'} after this: <b>${money(round2(owed - a))}</b>`
           else out.innerHTML = ''
         }
@@ -511,7 +512,13 @@
       if (v.tender === 'medical_aid') { medicalAid = (v.aid || '').trim(); memberNo = (v.member || '').trim(); if (!medicalAid) { banner('Enter the medical aid name.', true); continue } }
       const cashLeft = roundCash(left)
       if (v.tender === 'cash' && amount >= cashLeft && (!refund || amount === cashLeft)) {
-        // This cash settles the sale: what's due is rounded to the coin, anything over is change.
+        // This cash settles the sale: what's due is rounded to the coin, anything over is change. Change above the
+        // shop's limit is refused, which catches a mistyped amount (P1000 for P100).
+        const over = round2(amount - cashLeft)
+        if (!refund && maxChange > 0 && over > maxChange) {
+          banner(`The change would be ${money(over)}, more than the ${money(maxChange)} limit. Check the amount the customer handed over.`, true)
+          continue
+        }
         if (!refund) cashTendered = round2(cashTendered + amount)
         rounding = round2(rounding + cashLeft - left)
         amount = cashLeft
