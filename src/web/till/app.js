@@ -40,7 +40,7 @@
   let online = navigator.onLine
   let byCode = new Map()
 
-  function newCart(kind = 'sale') { return { kind, lines: [], refundOf: null, script: null } }
+  function newCart(kind = 'sale') { return { kind, lines: [], refundOf: null, script: null, approvals: [] } }
 
   function index() {
     byCode = new Map()
@@ -293,6 +293,29 @@
     render()
   }
 
+  /**
+   * A supervisor approves a discount, price change or refund with their staff code and second PIN. A cashier has no
+   * discount of their own. The server checks the PIN, so this needs the connection. Returns { id, approver } or null.
+   */
+  async function approve(action, note) {
+    if (!online) { banner('A supervisor approval needs the server, and this till is offline. It can be done again once the connection is back.', true); return null }
+    for (;;) {
+      const v = await ask(`<h2>Supervisor approval</h2><p class="muted">${esc(note)}</p>
+        <label>Supervisor code<input name="code" maxlength="2" autocomplete="off" autocapitalize="characters" style="text-transform:uppercase;width:90px" autofocus></label>
+        <label>Second PIN<input name="pin" type="password" inputmode="numeric" autocomplete="off"></label>${buttons('Approve')}`)
+      if (!v) return null
+      try {
+        const res = await fetch('/api/till/approve', {
+          method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ code: String(v.code || '').trim(), pin: String(v.pin || ''), action, note, cashierCode: String($('cashier-code').value || '').trim() }),
+        })
+        const body = await res.json().catch(() => ({}))
+        if (res.ok) { banner(''); return body }
+        banner(esc(body.error || 'The approval was refused.'), true)
+      } catch { banner('Could not reach the server for the approval. Try again when the till is online.', true); return null }
+    }
+  }
+
   async function changePrice() {
     const l = cart.lines[sel]
     if (!l || scriptLine(l)) return
@@ -303,6 +326,12 @@
     const sign = cart.kind === 'refund' ? -1 : 1
     let t = v.pct ? Math.abs(l.listTotal) * (1 - num(v.pct) / 100) : num(v.total)
     if (!(t >= 0)) { banner('The price must be zero or more.', true); return }
+    // Any change from the list price, up or down, needs a supervisor.
+    if (Math.abs(round2(t) - Math.abs(l.listTotal)) >= 0.005) {
+      const a = await approve(t < Math.abs(l.listTotal) ? 'discount' : 'price', `${l.d}: ${money(Math.abs(l.listTotal))} changed to ${money(round2(t))}`)
+      if (!a) return
+      cart.approvals = [...(cart.approvals || []), a.id]
+    }
     l.lineTotal = sign * round2(t)
     render()
   }
@@ -497,7 +526,7 @@
     const cashPaid = round2(payments.filter((p) => p.tender === 'cash').reduce((a, p) => a + p.amount, 0))
     const change = refund ? 0 : round2(cashTendered - cashPaid)
     const sale = {
-      id: uuid(), runId: run.id, kind: cart.kind, refundOf: cart.refundOf, occurredAt: new Date().toISOString(), cashierCode: cashier.c,
+      id: uuid(), runId: run.id, kind: cart.kind, refundOf: cart.refundOf, occurredAt: new Date().toISOString(), cashierCode: cashier.c, approvalIds: cart.approvals || [],
       accountId, medicalAid, memberNo, cashTendered: cashPaid > 0 && !refund ? cashTendered : null, rounding: round2(sign * rounding),
       scriptId: cart.script ? cart.script.id : null,
       lines: cart.lines.map((l) => ({ itemId: l.i, qtyUnits: l.units, listTotal: l.listTotal, lineTotal: l.lineTotal, scriptLineId: l.sl || null })),
@@ -753,7 +782,12 @@
 
   async function toggleRefund() {
     if (cart.lines.length) { banner('Finish or clear this sale before switching between sale and refund.', true); return }
-    cart = newCart(cart.kind === 'refund' ? 'sale' : 'refund')
+    if (cart.kind === 'refund') { cart = newCart('sale'); render(); return }
+    // Starting a refund needs a supervisor.
+    const a = await approve('refund', 'Start a refund')
+    if (!a) return
+    cart = newCart('refund')
+    cart.approvals.push(a.id)
     render()
   }
 
