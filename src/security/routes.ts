@@ -69,6 +69,8 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   // Stock and sales reports
   ['GET', '/reports', 'stock.reports'],
   ['GET', '/reports/minmax', 'stock.reports'],
+  ['GET', '/reports/tiers', 'stock.reports'],
+  ['GET', '/reports/tiers/order', 'stock.reports'],
   ['GET', '/reports/minmax/suggest', 'stock.adjust'],
   ['POST', '/reports/minmax/apply', 'stock.adjust'],
   ['GET', '/reports/valuation', 'stock.reports'],
