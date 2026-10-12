@@ -30,6 +30,7 @@ const navGroups: { slug: string; label: string; hue: string; icon: string; items
     ['F3', 'Receive', '/receiving', 'stock.receive'],
     ['F4', 'Stock take', '/stocktakes', 'stock.adjust'],
     ['F6', 'Order', '/reports/minmax', 'stock.reports'],
+    ['', 'Usage tiers', '/reports/tiers', 'stock.reports'],
   ] },
   { slug: 'dispensary', label: 'Dispensary', hue: '#3b6fe0', icon: '💊', items: [
     ['F5', 'Find patient', '/dispensary', 'rx.view'],
@@ -58,6 +59,7 @@ const tileInfo: Record<string, [icon: string, blurb: string]> = {
   '/receiving': ['🚚', 'Book in supplier deliveries and free stock'],
   '/stocktakes': ['🧮', 'Count the shelves and put right the differences'],
   '/reports/minmax': ['🛒', 'What to order: items at or below their minimum'],
+  '/reports/tiers': ['🏅', 'A, B and C items by profit, and a weekly order within a budget'],
   '/dispensary': ['🔍', 'Find a patient and start a script'],
   '/dispensary/patients/new': ['👤', 'Add a new patient or member'],
   '/dispensary/owed': ['🧾', 'Items still owed to patients'],
