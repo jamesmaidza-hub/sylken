@@ -56,12 +56,13 @@ function Find-Repo {
   $desktops = @($desktop, (Join-Path $HOME 'Desktop'), (Join-Path $HOME 'OneDrive\Desktop')) | Select-Object -Unique
   $found = @()
   foreach ($d in $desktops) {
-    $top = Join-Path $d 'sylken'
+    foreach ($top in @((Join-Path $d 'sylken-app'), (Join-Path $d 'sylken'))) {
     if (-not (Test-Path -LiteralPath $top)) { continue }
     if (Test-SylkenFolder $top) { $found += (Get-Item -LiteralPath $top).FullName }
     Get-ChildItem -LiteralPath $top -Directory -Recurse -Depth 1 -ErrorAction SilentlyContinue |
       Where-Object { $_.FullName -notmatch '\\node_modules(\\|$)' -and (Test-SylkenFolder $_.FullName) } |
       ForEach-Object { $found += $_.FullName }
+    }
   }
   $found = @($found | Select-Object -Unique)
   if ($found.Count -eq 0) { return $null }
@@ -154,10 +155,26 @@ function Copy-Code($from, $to, $names) {
 }
 
 function Invoke-Migrate($node, $repo) {
-  # Use the same settings as the app: .env if there is one, else sylken's built-in defaults (port 5433).
+  # Use the same settings as the app: the PC install's secrets.ps1 (as start-sylken.ps1 does),
+  # else .env if there is one, else sylken's built-in defaults (port 5433).
   $envFile = Join-Path $repo '.env'
   $saved = @{}
-  if (Test-Path -LiteralPath $envFile) {
+  $secrets = Join-Path $HOME 'sylken-tools\secrets.ps1'
+  if (Test-Path -LiteralPath $secrets) {
+    $PgSuperPassword = $null; $AppDbPassword = $null
+    . $secrets
+    $vars = @{
+      DATABASE_ADMIN_URL = "postgres://postgres:$PgSuperPassword@localhost:5433/sylken"
+      DATABASE_URL = "postgres://sylken_app:$AppDbPassword@localhost:5433/sylken"
+      APP_DB_PASSWORD = $AppDbPassword
+    }
+    foreach ($k in $vars.Keys) {
+      $saved[$k] = [Environment]::GetEnvironmentVariable($k, 'Process')
+      [Environment]::SetEnvironmentVariable($k, $vars[$k], 'Process')
+    }
+    $envFile = ''
+  }
+  if ($envFile -and (Test-Path -LiteralPath $envFile)) {
     foreach ($line in Get-Content -LiteralPath $envFile) {
       if ($line -match '^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$') {
         $k = $Matches[1]; $v = $Matches[2].Trim().Trim('"').Trim("'")
