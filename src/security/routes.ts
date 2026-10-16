@@ -47,6 +47,8 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['GET', '/items/bins', 'items.view'],
   ['GET', '/items/abc', 'items.view'],
   ['GET', '/items/abc/moves', 'items.view'],
+  ['GET', '/items/velocity', 'items.view'],
+  ['POST', '/items/velocity/import', 'stock.adjust'],
   ['POST', '/items/bins/move', 'stock.adjust'],
   ['POST', '/items', 'items.edit'],
   ['GET', '/items/:id', 'items.view'],
