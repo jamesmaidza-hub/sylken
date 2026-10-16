@@ -1,4 +1,7 @@
 import { Hono } from 'hono'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { raw } from 'hono/html'
 import { num } from '../db/index.js'
 import { abcRanking, importedPeriods, slotSuggestions, SLOTTING, type AbcBasis, type AbcRow, type AbcSource, type SlotMove } from '../domain/abc.js'
@@ -8,17 +11,23 @@ import { setMinMax } from '../domain/minmax.js'
 import { itemMovements } from '../domain/reports.js'
 import { getSettings } from '../domain/settings.js'
 import { adjustStock } from '../domain/stock.js'
+import { DEFAULT_DAYS, EMPTY_WEEK_MIN_AVG, salesVelocity, weeklySources, type ClassDays, type VelocityRow } from '../domain/velocity.js'
+import { importAbcSales } from '../import/abc-sales.js'
 import { packsToUnits } from '../domain/units.js'
 import { back, can, page, run, type Env } from './app.js'
 import { download, formatHref, type Col } from './export.js'
 import { dateTime, money, pct, qty, StatusChip } from './layout.js'
 
-/** The three ways of looking at the item list: search, by bin, and ABC. */
-const ItemTabs = ({ on }: { on: 'list' | 'bins' | 'abc' }) => (
+/** Where weekly sales imported from the velocity screen are kept, unless the user names another source. */
+const WEEKLY_SOURCE = 'Compharm weekly'
+
+/** The ways of looking at the item list: search, by bin, ABC and weekly sales velocity. */
+const ItemTabs = ({ on }: { on: 'list' | 'bins' | 'abc' | 'velocity' }) => (
   <nav class="tabs noprint">
     <a href="/items" class={on === 'list' ? 'on' : ''}>List</a>
     <a href="/items/bins" class={on === 'bins' ? 'on' : ''}>Bins</a>
     <a href="/items/abc" class={on === 'abc' ? 'on' : ''}>ABC</a>
+    <a href="/items/velocity" class={on === 'velocity' ? 'on' : ''}>Velocity</a>
   </nav>
 )
 
@@ -392,6 +401,128 @@ export function itemRoutes() {
         </table></div>
         {!shown.length && <p class="muted">No items here.</p>}
         <p class="hint">Items that sold are ranked best first and split by how many there are: A the top {aItems}%, B the next {bItems}%, C the other {100 - aItems - bItems}%. The A items usually bring in about 80% of the {basis === 'gp' ? 'profit' : 'sales'} (the Pareto rule); the percentage on each tab shows what they actually did. Items with no sales are not ranked. Own trading counts till sales and dispensed scripts (a script paid at the till is counted once). {mover ? 'To move a shelf item, use the Bins tab.' : ''}</p>
+      </>
+    ))
+  })
+
+  /** Weekly Compharm "Stock Usage" reports, one file per week, saved as weekly sales snapshots. */
+  r.post('/velocity/import', async (c) => {
+    const b = await c.req.parseBody({ all: true })
+    const files = ([] as unknown[]).concat(b.file ?? []).filter((f): f is File => f instanceof File && f.size > 0)
+    const source = String(b.source ?? '').trim() || WEEKLY_SOURCE
+    if (!files.length) return back(c, '/items/velocity', { err: 'Choose one or more Stock Usage report files' })
+    const dir = await mkdtemp(join(tmpdir(), 'sylken-velocity-'))
+    const done: string[] = []
+    const notWeekly: string[] = []
+    try {
+      for (const f of files) {
+        const path = join(dir, 'report.xlsx')
+        await writeFile(path, Buffer.from(await f.arrayBuffer()))
+        const rep = await run(c, (tx) => importAbcSales(tx, path, source)).catch((e: Error) => { throw new DomainError(`${f.name}: ${e.message}`) })
+        const days = (Date.parse(rep.to) - Date.parse(rep.from)) / 86_400_000 + 1
+        ;(days >= 6 && days <= 8 ? done : notWeekly).push(`${rep.from} to ${rep.to}`)
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+    const msg = `Imported ${done.length} week${done.length === 1 ? '' : 's'}${done.length ? ` (${done.join(', ')})` : ''}.`
+    return back(c, `/items/velocity?source=${encodeURIComponent(source)}`, notWeekly.length
+      ? { err: `${msg} Not counted as weeks, because they don't cover 7 days: ${notWeekly.join(', ')}.` } : { ok: msg })
+  })
+
+  r.get('/velocity', async (c) => {
+    const q = c.req.query()
+    const weeksWanted = Math.min(26, Math.max(2, Math.round(Number(q.weeks) || 8)))
+    const days: ClassDays = {
+      A: { min: Number(q.amin) || DEFAULT_DAYS.A.min, max: Number(q.amax) || DEFAULT_DAYS.A.max },
+      B: { min: Number(q.bmin) || DEFAULT_DAYS.B.min, max: Number(q.bmax) || DEFAULT_DAYS.B.max },
+      C: { min: Number(q.cmin) || DEFAULT_DAYS.C.min, max: Number(q.cmax) || DEFAULT_DAYS.C.max },
+    }
+    const { sources, result } = await run(c, async (tx) => {
+      const sources = await weeklySources(tx)
+      const source = sources.find((s) => s.label === q.source)?.label ?? sources[0]?.label
+      return { sources, result: source ? await salesVelocity(tx, { source, weeks: weeksWanted, days }) : null }
+    })
+    const show = (['all', 'A', 'B', 'C', 'empty', 'falling', 'order'] as const).find((k) => k === q.show) ?? 'all'
+    const rows = (result?.rows ?? []).filter((r) => show === 'all' ? true : show === 'empty' ? r.emptyWeeks.length > 0
+      : show === 'falling' ? r.trend === 'falling' : show === 'order' ? r.orderPacks > 0 : r.cls === show)
+    const wk = result?.weeks ?? []
+    const p1 = (n: number) => (Math.round(n * 10) / 10).toString()
+    const cols: Col<VelocityRow>[] = [
+      { h: 'Rank', v: (r) => r.rank }, { h: 'Class', v: (r) => r.cls }, { h: 'Stock code', v: (r) => r.stockCode }, { h: 'Description', v: (r) => r.description },
+      ...wk.map((w, i): Col<VelocityRow> => ({ h: `Week to ${w.to}`, v: (r) => r.weeks[i], fmt: 'qty' })),
+      { h: 'Per day', v: (r) => r.perDay, fmt: 'qty' }, { h: 'Weeks sold', v: (r) => r.weeksSold, fmt: 'int' },
+      { h: 'Empty-shelf weeks', v: (r) => r.emptyWeeks.length, fmt: 'int' }, { h: 'Packs lost', v: (r) => r.lostPacks, fmt: 'qty' },
+      { h: 'Trend', v: (r) => r.trend }, { h: 'Trend %', v: (r) => r.trendPct, fmt: 'pct' }, { h: 'Swing', v: (r) => r.swing, fmt: 'qty' },
+      { h: 'On hand (packs)', v: (r) => r.onHandPacks, fmt: 'qty' }, { h: 'Min', v: (r) => r.min, fmt: 'int' }, { h: 'Max', v: (r) => r.max, fmt: 'int' },
+      { h: 'Status', v: (r) => r.status }, { h: 'Order (packs)', v: (r) => r.orderPacks, fmt: 'int' },
+      { h: 'Cost per pack', v: (r) => r.costPerPack, fmt: 'money' }, { h: 'Order value', v: (r) => r.orderValue, fmt: 'money' },
+      { h: 'Sales excl VAT', v: (r) => r.sales, fmt: 'money' },
+    ]
+    const file = await download(c, 'sales-velocity', 'Sales velocity', cols, rows)
+    if (file) return file
+    const all = result?.rows ?? []
+    const count = (f: (r: VelocityRow) => boolean) => all.filter(f).length
+    const showHref = (k: string) => { const p = new URLSearchParams(new URL(c.req.url).search); for (const x of ['format', 'ok', 'err']) p.delete(x); p.set('show', k); return `?${p}` }
+    const importer = can(c, 'stock.adjust')
+    const daysInput = (name: string, v: number) => <input name={name} type="number" min="1" max="120" value={v} style="width:56px" />
+    return page(c, 'Sales velocity', (
+      <>
+        <div class="row"><h1>Items</h1><span class="spacer" />
+          {result && <><a class="btn secondary noprint" href={formatHref(c, 'xlsx')}>Download Excel</a><a class="btn secondary noprint" href={formatHref(c, 'csv')}>Download CSV</a></>}
+          <a class="btn noprint" href="/items/new">New item</a></div>
+        <ItemTabs on="velocity" />
+        <style>{raw('.abc-cls{display:inline-block;min-width:22px;text-align:center;border-radius:4px;font-weight:700;padding:1px 6px}.abc-A{background:#d9f2e3;color:#12643a}.abc-B{background:#fff1cc;color:#7a5600}.abc-C{background:#eceff3;color:#4b5563}.wk0{color:#b42318;font-weight:700}.vel-up{color:#12643a}.vel-down{color:#b42318}')}</style>
+        {importer && (
+          <form method="post" action="/items/velocity/import" enctype="multipart/form-data" class="row panel noprint">
+            <label class="f">Weekly Stock Usage reports<input type="file" name="file" accept=".xlsx" multiple required /></label>
+            <label class="f">Save as<input name="source" value={result?.source ?? WEEKLY_SOURCE} style="width:200px" /></label>
+            <button>Import</button>
+            <span class="hint">In Compharm, run the Stock Usage report for one week (Monday to Sunday) and save it as Excel. Pick one file per week, as many as you like. A week imported again replaces the earlier copy.</span>
+          </form>
+        )}
+        {!result ? <p class="panel">No weekly sales imported yet. Import at least two weeks of Compharm's Stock Usage report to see velocity.</p> : (
+          <>
+            <form class="row panel noprint">
+              <label class="f">Weeks from<select name="source">{sources.map((s) => <option value={s.label} selected={s.label === result.source}>{s.label} ({s.weeks} weeks, {s.from} to {s.to})</option>)}</select></label>
+              <label class="f">Last weeks<input name="weeks" type="number" min="2" max="26" value={weeksWanted} style="width:60px" /></label>
+              <label class="f">A min/max days<span class="row" style="gap:4px">{daysInput('amin', days.A.min)}{daysInput('amax', days.A.max)}</span></label>
+              <label class="f">B min/max days<span class="row" style="gap:4px">{daysInput('bmin', days.B.min)}{daysInput('bmax', days.B.max)}</span></label>
+              <label class="f">C min/max days<span class="row" style="gap:4px">{daysInput('cmin', days.C.min)}{daysInput('cmax', days.C.max)}</span></label>
+              <input type="hidden" name="show" value={show} />
+              <button class="secondary">Show</button>
+            </form>
+            <p class="muted">{wk.length} week{wk.length === 1 ? '' : 's'}, {wk[0]?.from} to {wk[wk.length - 1]?.to}. {all.length} items sold. Classes split by item count (top 20% A, next 30% B, rest C) on sales value.
+              A is ordered just in time (small orders every day), B weekly, C every few weeks; slow C items that sold one pack or less are ordered only when a customer asks.</p>
+            <nav class="tabs noprint">
+              <a href={showHref('all')} class={show === 'all' ? 'on' : ''}>All {all.length}</a>
+              {(['A', 'B', 'C'] as const).map((k) => <a href={showHref(k)} class={show === k ? 'on' : ''}><span class={`abc-cls abc-${k}`}>{k}</span> {count((r) => r.cls === k)}</a>)}
+              <a href={showHref('empty')} class={show === 'empty' ? 'on' : ''}>Empty-shelf weeks {count((r) => r.emptyWeeks.length > 0)}</a>
+              <a href={showHref('falling')} class={show === 'falling' ? 'on' : ''}>Falling {count((r) => r.trend === 'falling')}</a>
+              <a href={showHref('order')} class={show === 'order' ? 'on' : ''}>To order {count((r) => r.orderPacks > 0)} · {money(all.reduce((n, r) => n + r.orderValue, 0))}</a>
+            </nav>
+            <div class="wrap"><table>
+              <thead><tr><th class="n">#</th><th>Class</th><th>Description</th>{wk.map((w) => <th class="n" title={`${w.from} to ${w.to}`}>{w.to.slice(5)}</th>)}
+                <th class="n">Per day</th><th class="n">Weeks sold</th><th>Trend</th><th class="n">Swing</th><th class="n">On hand</th><th class="n">Min</th><th class="n">Max</th><th>Status</th><th class="n">Order</th><th class="n">Value</th></tr></thead>
+              <tbody>{rows.map((r) => (
+                <tr data-href={`/items/${r.itemId}`}>
+                  <td class="n">{r.rank}</td><td><span class={`abc-cls abc-${r.cls}`}>{r.cls}</span></td>
+                  <td><a href={`/items/${r.itemId}`}>{r.description}</a></td>
+                  {r.weeks.map((w, i) => <td class={`n ${r.emptyWeeks.includes(i) ? 'wk0' : ''}`} title={r.emptyWeeks.includes(i) ? 'No sales this week; probably an empty shelf' : ''}>{p1(w)}</td>)}
+                  <td class="n">{p1(r.perDay)}</td><td class="n">{r.weeksSold}/{wk.length}</td>
+                  <td class={r.trend === 'rising' ? 'vel-up' : r.trend === 'falling' ? 'vel-down' : ''}>{r.trend === '-' ? '' : `${r.trend} ${r.trendPct! > 0 ? '+' : ''}${r.trendPct}%`}</td>
+                  <td class="n">{r.swing}</td><td class={`n ${r.onHandPacks < 0 ? 'neg' : ''}`}>{p1(r.onHandPacks)}</td>
+                  <td class="n">{r.onRequest ? '' : r.min}</td><td class="n">{r.onRequest ? '' : r.max}</td><td>{r.status}</td>
+                  <td class="n">{r.orderPacks || ''}</td><td class="n">{r.orderValue ? money(r.orderValue) : ''}</td>
+                </tr>
+              ))}</tbody>
+            </table></div>
+            {!rows.length && <p class="muted">No items here.</p>}
+            <p class="hint">Per day is the average over the weeks shown, in packs. A week in red had no sales although the item usually sells {EMPTY_WEEK_MIN_AVG} or more packs a week: probably an empty shelf, not a lack of customers.
+              Trend compares the second half of the weeks with the first (more than 25% either way counts). Swing is how much weekly sales vary (0 is steady); a high swing adds safety stock to Min.
+              Min and Max use the days set above for each class; order is up to Max when stock is at or below Min. Nothing changes the item's own min/max until you set it on the item.</p>
+          </>
+        )}
       </>
     ))
   })

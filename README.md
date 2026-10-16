@@ -14,6 +14,7 @@ Built so far: **stage 1, items and stock**, **stage 2, till and cash-up**, and *
 - **Min/max ordering**: the same rule as Compharm (every item at or below min, order up to max), exact and whole-pack quantities, CSV download, plus suggested levels from average daily usage.
 - **Reports**: stock value, negative stock, dormant stock, adjustments, GP exceptions, quarantined items, stock card and price history per item.
 - **Compharm import**: item list, min/max, 12-month usage and monthly sales exports.
+- **Sales velocity** (Items → Velocity): import Compharm's Stock Usage report one week at a time from the screen, and see per item the sales per day, weeks sold, weeks that look like an empty shelf, the trend and the week-to-week swing, with just-in-time min/max per ABC class (A every day, B weekly, C every few weeks, slow C on request) and what to order.
 - **Keyboard first**: F2 items, F3 receive, F4 stock take, F5 dispensary, F6 order, F7 reports, F8 settings, F9 till, F10 cash-up, `/` to search, arrows and Enter to pick. A scanned barcode opens the item directly.
 
 ## What stage 2 adds: the till and cash-up
