@@ -59,6 +59,14 @@
       <div id="photoMsg" style="margin-top:6px;color:var(--mute);font-size:12px">Needs the server: <code>node server.js</code>, then open http://localhost:3100</div>
     </div>
     <div class="card" style="margin-top:12px">
+      <h2>Sales history</h2>
+      <input type="file" id="salesFile" accept=".xlsx,.xls,.csv">
+      <label style="margin-top:8px">Days in period <input type="number" id="salesDays" min="1" placeholder="auto"></label>
+      <label style="justify-content:flex-start"><input type="checkbox" id="fromSales" checked> Size facings from sales</label>
+      <div id="salesMsg" style="margin-top:6px;color:var(--mute);font-size:12px">Excel or CSV: Compharm Stock Usage, or a sales log with item, qty and date columns.</div>
+      <div id="unmatched" style="margin-top:6px;font-size:12px"></div>
+    </div>
+    <div class="card" style="margin-top:12px">
       <h2>Products</h2>
       <input type="file" id="file" accept=".csv,text/csv">
       <div class="row">
@@ -83,8 +91,10 @@
     <div id="unplaced"></div>
   </section>
 </main>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script src="engine.js"></script>
 <script src="vision.js"></script>
+<script src="sales.js"></script>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -166,6 +176,43 @@
       : '';
   }
 
+  // --- sales history (Excel/CSV) ---
+  let sales = null; // {items, days, from, to}
+
+  function applySales() {
+    products.forEach((p) => { if (p.stockVelocity == null) p.stockVelocity = p.velocity; });
+    if (!sales) { products.forEach((p) => { p.salesPerDay = null; p.velocity = p.stockVelocity; }); return; }
+    const days = +$('salesDays').value || sales.days || 30;
+    const m = PlanogramSales.matchProducts(products, sales.items);
+    products.forEach((p, i) => {
+      p.salesPerDay = m[i] ? +(m[i].item.qty / days).toFixed(3) : null;
+      p.matchedName = m[i] ? m[i].item.name || m[i].item.code : null;
+      p.velocity = p.salesPerDay != null ? p.salesPerDay : p.stockVelocity;
+    });
+    const matched = m.filter(Boolean).length;
+    $('salesMsg').textContent = matched + ' of ' + products.length + ' products matched to ' + sales.items.length + ' sales rows over ' + days + ' days' + (sales.from ? ' (' + sales.from + ' to ' + sales.to + ')' : '') + '.';
+    const gone = products.filter((p, i) => !m[i]).map((p) => p.name);
+    $('unmatched').innerHTML = gone.length ? '<span class="warn">No sales found for: ' + gone.map(esc).join(', ') + '. Rename them in the table to match the sales file, or they keep their shelf counts.</span>' : '';
+  }
+
+  $('salesFile').onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    $('salesMsg').textContent = 'Reading ' + f.name + '…';
+    f.arrayBuffer().then((buf) => {
+      const wb = XLSX.read(buf, { cellDates: true });
+      let parsed = null, err = null;
+      for (const name of wb.SheetNames) {
+        try { parsed = PlanogramSales.parseSales(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: '' })); break; } catch (x) { err = x; }
+      }
+      if (!parsed) throw err || new Error('No sheet could be read.');
+      sales = parsed;
+      $('salesDays').value = parsed.days || '';
+      if (!products.length) { $('salesMsg').textContent = parsed.items.length + ' sales rows read. Now load products (photo, CSV or sample) to plan with them.'; return; }
+      applySales(); renderReview($('review').dataset.notes);
+    }).catch((x) => { sales = null; $('salesMsg').textContent = x.message || 'Could not read that file.'; });
+  };
+  $('salesDays').onchange = () => { if (sales && products.length) { applySales(); renderReview($('review').dataset.notes); } };
+
   // --- shelf photo -> products with quantities ---
   function shrinkPhoto(file) {
     return createImageBitmap(file).then((bmp) => {
@@ -180,17 +227,19 @@
   function renderReview(notes) {
     if (!products.length || !products[0].confidence) { $('review').innerHTML = ''; return; }
     const total = products.reduce((a, p) => a + (+p.fixedFacings || 0) * (+p.unitsDeep || 0), 0);
+    const hasSales = products.some((p) => p.salesPerDay != null);
     $('review').innerHTML = '<h2 style="margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)">Read from photo — check and correct</h2>' +
       (notes ? '<p class="warn" style="margin:0 0 6px">' + esc(notes) + '</p>' : '') +
-      '<table><tr><th>Product</th><th>Category</th><th>Facings</th><th>Units deep</th><th>Units</th><th>Sure?</th><th></th></tr>' +
+      '<table><tr><th>Product</th><th>Category</th><th>Facings</th><th>Units deep</th><th>Units</th>' + (hasSales ? '<th>Sold/day</th>' : '') + '<th>Sure?</th><th></th></tr>' +
       products.map((p, i) => '<tr><td><input data-i="' + i + '" data-k="name" value="' + esc(p.name) + '" style="width:100%"></td>' +
         '<td><input data-i="' + i + '" data-k="category" value="' + esc(p.category) + '" style="width:100%"></td>' +
         '<td><input type="number" min="1" data-i="' + i + '" data-k="fixedFacings" value="' + p.fixedFacings + '" style="width:60px"></td>' +
         '<td><input type="number" min="1" data-i="' + i + '" data-k="unitsDeep" value="' + p.unitsDeep + '" style="width:60px"></td>' +
         '<td>' + p.fixedFacings * p.unitsDeep + '</td>' +
+        (hasSales ? '<td title="' + esc(p.matchedName || 'no match in sales file') + '" class="' + (p.salesPerDay == null ? 'warn' : '') + '">' + (p.salesPerDay == null ? 'no match' : p.salesPerDay.toFixed(2)) + '</td>' : '') +
         '<td class="' + (p.confidence === 'high' ? '' : 'warn') + '">' + esc(p.confidence) + '</td>' +
         '<td><button data-del="' + i + '">✕</button></td></tr>').join('') +
-      '<tr><td colspan="4"><b>Total on shelf</b></td><td><b>' + total + '</b></td><td colspan="2"></td></tr></table>';
+      '<tr><td colspan="4"><b>Total on shelf</b></td><td><b>' + total + '</b></td><td colspan="' + (hasSales ? 3 : 2) + '"></td></tr></table>';
     $('review').dataset.notes = notes || '';
   }
 
@@ -199,7 +248,8 @@
     if (t.dataset.k) {
       const num = t.dataset.k === 'fixedFacings' || t.dataset.k === 'unitsDeep';
       products[i][t.dataset.k] = num ? Math.max(1, Math.round(+t.value || 1)) : t.value;
-      products[i].velocity = +((products[i].fixedFacings * products[i].unitsDeep) / (+$('daysCover').value || 7)).toFixed(2);
+      products[i].stockVelocity = +((products[i].fixedFacings * products[i].unitsDeep) / (+$('daysCover').value || 7)).toFixed(2);
+      applySales();
       renderReview($('review').dataset.notes);
     }
   });
@@ -258,6 +308,7 @@
     products = list;
     $('count').textContent = list.length + ' products loaded';
     $('msg').textContent = '';
+    if (sales) applySales();
   }
 
   $('sample').onclick = () => { setProducts(sampleProducts()); renderReview(); };
@@ -273,7 +324,12 @@
     'sku,name,category,width,height,depth,velocity,min facings,max facings\nA001,Paracetamol 500mg x24,Pain relief,60,110,40,6,1,6\n', 'text/csv');
   $('go').onclick = () => {
     if (!products.length) { $('msg').textContent = 'Load a CSV or the sample data first.'; return; }
-    layout = Planogram.generate(products, readOptions());
+    const input = products.map((p) => {
+      const q = Object.assign({}, p);
+      if ($('fromSales').checked && p.salesPerDay != null) { delete q.fixedFacings; q.maxFacings = q.maxFacings || 8; }
+      return q;
+    });
+    layout = Planogram.generate(input, readOptions());
     render();
   };
   $('csv').onclick = () => layout && download('planogram-layout.csv', Planogram.layoutToCsv(layout), 'text/csv');

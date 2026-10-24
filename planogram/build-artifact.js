@@ -4,8 +4,8 @@ const path = require('node:path');
 const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
 let html = read('index.html');
 const style = /<style>([\s\S]*?)<\/style>/.exec(html)[1];
-const body = /<body>([\s\S]*?)<script src="engine.js"><\/script>/.exec(html)[1];
-const page = /<script>\n\(function \(\) \{[\s\S]*<\/script>/.exec(html.split('<script src="vision.js"></script>')[1])[0];
+const body = /<body>([\s\S]*?)<script src="https:\/\/cdnjs/.exec(html)[1];
+const page = /<script>\n\(function \(\) \{[\s\S]*<\/script>/.exec(html.split('<script src="sales.js"></script>')[1])[0];
 const themed = style
   .replace('@media (prefers-color-scheme: dark) {\n    :root {', '@media (prefers-color-scheme: dark) {\n    :root:not([data-theme="light"]) {')
   + '\n  :root[data-theme="dark"] { --bg:#12151c; --card:#1b2029; --ink:#e8ebf2; --mute:#98a1b5; --line:#2e3542; --accent:#6c93ff; --warn:#f0a35c; }'
@@ -17,8 +17,10 @@ const out = `<title>Shelf Planner</title>
 <meta name="claude:viewport-fit-sides" content="cover">
 <style>${themed}</style>
 ${body}
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 <script>${read('engine.js')}</script>
 <script>${read('vision.js')}</script>
+<script>${read('sales.js')}</script>
 ${page}
 `;
 fs.writeFileSync(path.join(__dirname, 'dist-artifact.html'), out);
