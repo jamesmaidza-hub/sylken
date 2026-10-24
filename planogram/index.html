@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Planogram Builder</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1c2230; --mute:#6b7385; --line:#d9dde5; --accent:#2457d6; --warn:#b4540a; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#12151c; --card:#1b2029; --ink:#e8ebf2; --mute:#98a1b5; --line:#2e3542; --accent:#6c93ff; --warn:#f0a35c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px; border-bottom:1px solid var(--line); background:var(--card); }
+  h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:var(--mute); }
+  main { display:grid; grid-template-columns:300px 1fr; gap:16px; padding:16px; align-items:start; }
+  @media (max-width: 800px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px; }
+  .card h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--mute); }
+  label { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:6px 0; }
+  input[type=number] { width:90px; padding:4px 6px; border:1px solid var(--line); border-radius:4px; background:var(--bg); color:var(--ink); }
+  button { padding:7px 12px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); cursor:pointer; font:inherit; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .stats { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:10px; }
+  .stat b { display:block; font-size:18px; }
+  .stat span { color:var(--mute); font-size:12px; }
+  #stage { overflow:auto; }
+  svg text { font-family:system-ui,sans-serif; }
+  table { border-collapse:collapse; width:100%; margin-top:10px; font-size:13px; }
+  th, td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
+  .warn { color:var(--warn); }
+  #msg { color:var(--warn); margin-top:6px; min-height:1em; }
+  @media print { header, aside, .noprint { display:none !important; } main { display:block; padding:0; } .card { border:0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1>Planogram Builder</h1>
+  <p>Load a product list, set the shelf size, and get a layout blocked by category with the fastest sellers at eye level.</p>
+</header>
+<main>
+  <aside>
+    <div class="card">
+      <h2>Fixture</h2>
+      <label>Bays <input type="number" id="bays" value="4" min="1"></label>
+      <label>Bay width (mm) <input type="number" id="bayWidth" value="1000" min="100"></label>
+      <label>Shelves <input type="number" id="shelves" value="5" min="1" max="10"></label>
+      <label>Shelf height (mm) <input type="number" id="shelfHeight" value="300" min="50"></label>
+      <label>Shelf depth (mm) <input type="number" id="shelfDepth" value="400" min="50"></label>
+      <label>Days of cover <input type="number" id="daysCover" value="7" min="1"></label>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Products</h2>
+      <input type="file" id="file" accept=".csv,text/csv">
+      <div class="row">
+        <button id="sample">Load sample data</button>
+        <button id="template">Download CSV template</button>
+      </div>
+      <p style="color:var(--mute);margin:8px 0 0;font-size:12px">Columns: sku, name, category, width, height, depth (mm), velocity (units per day). Optional: min facings, max facings.</p>
+      <div id="count" style="margin-top:6px"></div>
+      <div class="row"><button class="primary" id="go">Generate layout</button></div>
+      <div id="msg"></div>
+    </div>
+  </aside>
+  <section class="card">
+    <div class="stats" id="stats"></div>
+    <div id="stage"><p style="color:var(--mute)">Load a CSV or the sample data, then press Generate layout.</p></div>
+    <div class="row noprint" id="actions" hidden>
+      <button id="csv">Download layout CSV</button>
+      <button id="svg">Download SVG</button>
+      <button id="print">Print</button>
+    </div>
+    <div id="unplaced"></div>
+  </section>
+</main>
+<script src="engine.js"></script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let products = [], layout = null;
+
+  const PALETTE = ['#4f7cff','#e8743b','#2fa36b','#b05bd6','#d4a017','#16a7b8','#d6457a','#7a8a2e','#6b6fd6','#c25b3f'];
+
+  function sampleProducts() {
+    const cats = [['Cough & cold', 14], ['Pain relief', 16], ['Vitamins', 12], ['Skin care', 12], ['First aid', 10], ['Baby', 8]];
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const out = [];
+    cats.forEach(([cat, n], ci) => {
+      for (let i = 1; i <= n; i++) {
+        out.push({ sku: cat.slice(0, 3).toUpperCase() + i, name: cat + ' item ' + i, category: cat,
+          width: Math.round(40 + rnd() * 60), height: Math.round(70 + rnd() * 150), depth: Math.round(35 + rnd() * 80),
+          velocity: +(Math.pow(rnd(), 2.2) * 18 + 0.2).toFixed(2) });
+      }
+    });
+    return out;
+  }
+
+  function readOptions() {
+    const shelves = +$('shelves').value || 5;
+    return { bays: +$('bays').value || 1, bayWidth: +$('bayWidth').value || 1000, shelves,
+      shelfHeights: Array(shelves).fill(+$('shelfHeight').value || 300),
+      shelfDepth: +$('shelfDepth').value || 400, daysCover: +$('daysCover').value || 7 };
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c])); }
+
+  function drawSvg(l) {
+    const scale = 0.7, gap = 14, labelH = 22;
+    const W = l.summary.fixtureWidth * scale, rowH = (r) => l.rows[r].height * scale;
+    const tops = []; let y = labelH;
+    l.rows.forEach((r, i) => { tops.push(y); y += rowH(i) + gap; });
+    const H = y;
+    const cats = l.blocks.map((b) => b.category);
+    const colour = (c) => PALETTE[cats.indexOf(c) % PALETTE.length];
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W + 40}" height="${H + 10}" viewBox="-30 0 ${W + 40} ${H + 10}">`;
+    l.blocks.forEach((b) => {
+      s += `<text x="${b.x * scale + 2}" y="14" font-size="11" fill="${colour(b.category)}" font-weight="600">${esc(b.category)}</text>`;
+    });
+    l.rows.forEach((r, i) => {
+      s += `<rect x="0" y="${tops[i]}" width="${W}" height="${rowH(i)}" fill="none" stroke="#8a93a6" stroke-width="0.5"/>`;
+      s += `<rect x="0" y="${tops[i] + rowH(i)}" width="${W}" height="3" fill="#8a93a6"/>`;
+      s += `<text x="-6" y="${tops[i] + rowH(i) / 2 + 4}" font-size="11" text-anchor="end" fill="#8a93a6">${i + 1}</text>`;
+    });
+    for (let b = 1; b < l.options.bays; b++) {
+      const x = b * l.options.bayWidth * scale;
+      s += `<line x1="${x}" y1="${labelH}" x2="${x}" y2="${H}" stroke="#8a93a6" stroke-dasharray="4 3"/>`;
+    }
+    l.placements.forEach((p) => {
+      const x = p.x * scale, w = p.width * scale, h = p.product.height * scale, y0 = tops[p.row] + rowH(p.row) - h;
+      const c = colour(p.product.category);
+      s += `<g><title>${esc(p.product.name)} (${esc(p.product.sku)}) — ${p.facings} facing(s), ${p.product.unitsPerFacing} deep, ${p.daysCover == null ? 'n/a' : p.daysCover.toFixed(1)} days cover</title>`;
+      s += `<rect x="${x + 0.5}" y="${y0}" width="${Math.max(1, w - 1)}" height="${h}" fill="${c}" fill-opacity="0.78" stroke="${c}"/>`;
+      for (let f = 1; f < p.facings; f++) {
+        const fx = x + f * p.product.width * scale;
+        s += `<line x1="${fx}" y1="${y0}" x2="${fx}" y2="${y0 + h}" stroke="#fff" stroke-opacity="0.7"/>`;
+      }
+      if (w > 28) s += `<text x="${x + 3}" y="${y0 + 12}" font-size="9" fill="#fff" style="pointer-events:none">${esc(p.product.sku)}${p.facings > 1 ? ' ×' + p.facings : ''}</text>`;
+      s += '</g>';
+    });
+    return s + '</svg>';
+  }
+
+  function render() {
+    const l = layout, sm = l.summary;
+    $('stats').innerHTML = [
+      [sm.placed + ' / ' + sm.products, 'products placed'],
+      [(sm.utilisation * 100).toFixed(0) + '%', 'shelf space used'],
+      [(sm.attention * 100).toFixed(0) + '%', 'placement score'],
+      [sm.unplaced, 'not placed'],
+    ].map(([v, k]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+    $('stage').innerHTML = drawSvg(l);
+    $('actions').hidden = false;
+    $('unplaced').innerHTML = l.unplaced.length
+      ? '<table><tr><th>Not placed</th><th>Reason</th></tr>' + l.unplaced.map((u) => `<tr><td>${esc(u.product.name)} (${esc(u.product.sku)})</td><td class="warn">${esc(u.reason)}</td></tr>`).join('') + '</table>'
+      : '';
+  }
+
+  function download(name, text, type) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function setProducts(list) {
+    products = list;
+    $('count').textContent = list.length + ' products loaded';
+    $('msg').textContent = '';
+  }
+
+  $('sample').onclick = () => setProducts(sampleProducts());
+  $('file').onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    f.text().then((t) => {
+      const list = Planogram.productsFromCsv(t);
+      if (!list.length) { $('msg').textContent = 'No rows found in that file.'; return; }
+      setProducts(list);
+    });
+  };
+  $('template').onclick = () => download('planogram-template.csv',
+    'sku,name,category,width,height,depth,velocity,min facings,max facings\nA001,Paracetamol 500mg x24,Pain relief,60,110,40,6,1,6\n', 'text/csv');
+  $('go').onclick = () => {
+    if (!products.length) { $('msg').textContent = 'Load a CSV or the sample data first.'; return; }
+    layout = Planogram.generate(products, readOptions());
+    render();
+  };
+  $('csv').onclick = () => layout && download('planogram-layout.csv', Planogram.layoutToCsv(layout), 'text/csv');
+  $('svg').onclick = () => layout && download('planogram.svg', drawSvg(layout), 'image/svg+xml');
+  $('print').onclick = () => window.print();
+})();
+</script>
+</body>
+</html>
