@@ -52,6 +52,13 @@
       <label>Days of cover <input type="number" id="daysCover" value="7" min="1"></label>
     </div>
     <div class="card" style="margin-top:12px">
+      <h2>Shelf photo</h2>
+      <input type="file" id="photo" accept="image/*" capture="environment">
+      <label style="margin-top:8px">Shelf run width (mm, optional) <input type="number" id="photoWidth" placeholder="e.g. 1200"></label>
+      <div class="row"><button class="primary" id="analyse">Read photo</button></div>
+      <div id="photoMsg" style="margin-top:6px;color:var(--mute);font-size:12px">Needs the server: <code>node server.js</code>, then open http://localhost:3100</div>
+    </div>
+    <div class="card" style="margin-top:12px">
       <h2>Products</h2>
       <input type="file" id="file" accept=".csv,text/csv">
       <div class="row">
@@ -66,6 +73,7 @@
   </aside>
   <section class="card">
     <div class="stats" id="stats"></div>
+    <div id="review"></div>
     <div id="stage"><p style="color:var(--mute)">Load a CSV or the sample data, then press Generate layout.</p></div>
     <div class="row noprint" id="actions" hidden>
       <button id="csv">Download layout CSV</button>
@@ -157,6 +165,67 @@
       : '';
   }
 
+  // --- shelf photo -> products with quantities ---
+  function shrinkPhoto(file) {
+    return createImageBitmap(file).then((bmp) => {
+      const k = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      return c.toDataURL('image/jpeg', 0.85);
+    });
+  }
+
+  function renderReview(notes) {
+    if (!products.length || !products[0].confidence) { $('review').innerHTML = ''; return; }
+    const total = products.reduce((a, p) => a + (+p.fixedFacings || 0) * (+p.unitsDeep || 0), 0);
+    $('review').innerHTML = '<h2 style="margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)">Read from photo — check and correct</h2>' +
+      (notes ? '<p class="warn" style="margin:0 0 6px">' + esc(notes) + '</p>' : '') +
+      '<table><tr><th>Product</th><th>Category</th><th>Facings</th><th>Units deep</th><th>Units</th><th>Sure?</th><th></th></tr>' +
+      products.map((p, i) => '<tr><td><input data-i="' + i + '" data-k="name" value="' + esc(p.name) + '" style="width:100%"></td>' +
+        '<td><input data-i="' + i + '" data-k="category" value="' + esc(p.category) + '" style="width:100%"></td>' +
+        '<td><input type="number" min="1" data-i="' + i + '" data-k="fixedFacings" value="' + p.fixedFacings + '" style="width:60px"></td>' +
+        '<td><input type="number" min="1" data-i="' + i + '" data-k="unitsDeep" value="' + p.unitsDeep + '" style="width:60px"></td>' +
+        '<td>' + p.fixedFacings * p.unitsDeep + '</td>' +
+        '<td class="' + (p.confidence === 'high' ? '' : 'warn') + '">' + esc(p.confidence) + '</td>' +
+        '<td><button data-del="' + i + '">✕</button></td></tr>').join('') +
+      '<tr><td colspan="4"><b>Total on shelf</b></td><td><b>' + total + '</b></td><td colspan="2"></td></tr></table>';
+    $('review').dataset.notes = notes || '';
+  }
+
+  $('review').addEventListener('change', (e) => {
+    const t = e.target, i = +t.dataset.i;
+    if (t.dataset.k) {
+      const num = t.dataset.k === 'fixedFacings' || t.dataset.k === 'unitsDeep';
+      products[i][t.dataset.k] = num ? Math.max(1, Math.round(+t.value || 1)) : t.value;
+      products[i].velocity = +((products[i].fixedFacings * products[i].unitsDeep) / (+$('daysCover').value || 7)).toFixed(2);
+      renderReview($('review').dataset.notes);
+    }
+  });
+  $('review').addEventListener('click', (e) => {
+    if (e.target.dataset.del !== undefined) { products.splice(+e.target.dataset.del, 1); setProducts(products); renderReview($('review').dataset.notes); }
+  });
+
+  $('analyse').onclick = async () => {
+    const f = $('photo').files[0];
+    if (!f) { $('photoMsg').textContent = 'Choose or take a photo first.'; return; }
+    $('analyse').disabled = true; $('photoMsg').textContent = 'Reading the photo… this can take up to a minute.';
+    try {
+      const image = await shrinkPhoto(f);
+      const res = await fetch('/api/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ image, daysCover: +$('daysCover').value || 7, hints: { bayWidthMm: +$('photoWidth').value || undefined } }) });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || 'Failed');
+      setProducts(json.products);
+      if (json.analysis.shelf_count > 0) $('shelves').value = json.analysis.shelf_count;
+      if (+$('photoWidth').value > 0) { $('bays').value = 1; $('bayWidth').value = +$('photoWidth').value; }
+      renderReview(json.analysis.notes);
+      $('photoMsg').textContent = json.products.length + ' products found. Correct anything wrong, then Generate layout.';
+    } catch (e) {
+      $('photoMsg').textContent = e.message === 'Failed to fetch' || /JSON/.test(e.message) ? 'Could not reach the server. Run node server.js and open http://localhost:3100.' : e.message;
+    } finally { $('analyse').disabled = false; }
+  };
+
   function download(name, text, type) {
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], { type }));
@@ -169,7 +238,7 @@
     $('msg').textContent = '';
   }
 
-  $('sample').onclick = () => setProducts(sampleProducts());
+  $('sample').onclick = () => { setProducts(sampleProducts()); renderReview(); };
   $('file').onchange = (e) => {
     const f = e.target.files[0]; if (!f) return;
     f.text().then((t) => {

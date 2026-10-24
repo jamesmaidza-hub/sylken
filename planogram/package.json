@@ -1,1 +1,1 @@
-{ "name": "planogram", "private": true, "type": "commonjs" }
+{"name":"planogram","private":true,"type":"commonjs","dependencies":{"@anthropic-ai/sdk":"^1.3.0"}}

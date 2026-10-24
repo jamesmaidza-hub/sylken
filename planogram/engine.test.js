@@ -75,3 +75,9 @@ test('csv in and out, with quotes and header aliases', () => {
   const out = P.layoutToCsv(P.generate(prods, {}));
   assert.ok(out.includes('"Cough, syrup 100ml"'));
 });
+
+test('fixed facings and counted depth are kept (photo-derived quantities)', () => {
+  const l = P.generate([mk('A', 'x', 1, { fixedFacings: 3, unitsDeep: 5 })], {});
+  assert.equal(l.placements[0].facings, 3);
+  assert.equal(l.placements[0].product.unitsPerFacing, 5);
+});

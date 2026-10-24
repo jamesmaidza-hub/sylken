@@ -35,7 +35,10 @@
       velocity: Math.max(0, num(p.velocity, 0)),
       minFacings: Math.max(1, Math.floor(num(p.minFacings, 1))),
       maxFacings: Math.max(1, Math.floor(num(p.maxFacings, 8))),
+      unitsDeep: Math.max(0, Math.floor(num(p.unitsDeep, 0))), // known units per facing, e.g. counted from a photo
     };
+    const fixed = Math.floor(num(p.fixedFacings, 0)); // keep exactly this many facings (e.g. as photographed)
+    if (fixed > 0) { out.minFacings = fixed; out.maxFacings = fixed; }
     if (out.maxFacings < out.minFacings) out.maxFacings = out.minFacings;
     return out;
   }
@@ -66,7 +69,7 @@
       if (bad) return unplaced.push({ product: p, reason: bad });
       if (p.height > maxHeight) return unplaced.push({ product: p, reason: 'taller than every shelf' });
       if (p.width > rowLength) return unplaced.push({ product: p, reason: 'wider than the fixture' });
-      const deep = Math.max(1, Math.floor(o.shelfDepth / p.depth));
+      const deep = p.unitsDeep > 0 ? p.unitsDeep : Math.max(1, Math.floor(o.shelfDepth / p.depth));
       const wanted = Math.ceil((p.velocity * o.daysCover) / deep);
       p.unitsPerFacing = deep;
       p.facings = Math.min(p.maxFacings, Math.max(p.minFacings, wanted, 1));
@@ -214,6 +217,8 @@
     velocity: ['velocity', 'sales per day', 'units per day', 'daily sales', 'sales/day'],
     minFacings: ['min facings', 'minfacings', 'min'],
     maxFacings: ['max facings', 'maxfacings', 'max'],
+    fixedFacings: ['facings', 'fixed facings'],
+    unitsDeep: ['units deep', 'units per facing'],
   };
 
   function productsFromCsv(text) {
@@ -234,11 +239,11 @@
 
   function layoutToCsv(layout) {
     const esc = (v) => (/[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
-    const lines = [['sku', 'name', 'category', 'shelf', 'x_mm', 'facings', 'units_per_facing', 'days_cover']];
+    const lines = [['sku', 'name', 'category', 'shelf', 'x_mm', 'facings', 'units_per_facing', 'units', 'days_cover']];
     layout.placements
       .slice().sort((a, b) => a.row - b.row || a.x - b.x)
-      .forEach((p) => lines.push([p.product.sku, p.product.name, p.product.category, p.row + 1, Math.round(p.x), p.facings, p.product.unitsPerFacing, p.daysCover == null ? '' : p.daysCover.toFixed(1)]));
-    layout.unplaced.forEach((u) => lines.push([u.product.sku, u.product.name, u.product.category, '', '', '', '', 'UNPLACED: ' + u.reason]));
+      .forEach((p) => lines.push([p.product.sku, p.product.name, p.product.category, p.row + 1, Math.round(p.x), p.facings, p.product.unitsPerFacing, p.facings * p.product.unitsPerFacing, p.daysCover == null ? '' : p.daysCover.toFixed(1)]));
+    layout.unplaced.forEach((u) => lines.push([u.product.sku, u.product.name, u.product.category, '', '', '', '', '', 'UNPLACED: ' + u.reason]));
     return lines.map((l) => l.map(esc).join(',')).join('\n') + '\n';
   }
 

@@ -5,6 +5,12 @@ Standalone, dependency-free planogram tool. Open `index.html` in a browser, load
 - `engine.js`: the auto-layout engine (browser and Node). `Planogram.generate(products, options)`.
 - `engine.test.js`: run with `node --test engine.test.js`.
 
+## Plan from a photo
+
+`node server.js` (set `ANTHROPIC_API_KEY`, or run `ant auth login` first), then open http://localhost:3100. Choose or take a photo of a shelf, optionally enter the shelf run width in mm so pack sizes are scaled, and press **Read photo**. Claude (`claude-opus-5-5`) lists each product with its category, facings, units stacked deep and estimated pack size. Check and correct the table (names, facings, units deep), then **Generate layout**. The counts you confirm are kept exactly (units = facings x units deep) and the layout is blocked by category with the fastest stock on the best shelves; current stock is used as the demand signal. The layout CSV includes a units column.
+
+The photo is sent to the Anthropic API; nothing is stored. Pack sizes and depth counts are estimates, so review low-confidence rows. Tests use a fake Claude client; the live API call has not been exercised in this repo yet.
+
 ## How the layout is made
 
 1. **Facings** per product = days of cover x sales per day / units that fit in the shelf depth, clamped to the product's min/max facings.
