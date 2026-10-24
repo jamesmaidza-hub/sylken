@@ -87,4 +87,11 @@ function toProducts(analysis, daysCover) {
   });
 }
 
-module.exports = { MODEL, SCHEMA, analyseShelfPhoto, toProducts, buildPrompt };
+// Same prompt, for runtimes that return JSON from plain text instead of a schema (the artifact's sample capability).
+function buildJsonPrompt(hints) {
+  return buildPrompt(hints) + '\n\nReply with only one JSON object, no other text, shaped like:\n' +
+    '{"shelf_count": 3, "notes": "", "products": [{"name": "Panado 500mg x24", "category": "Pain relief", "shelf": 1, "position": 1, "facings": 3, "units_deep": 4, "width_mm": 60, "height_mm": 110, "depth_mm": 40, "confidence": "high"}]}';
+}
+
+if (typeof module === 'object' && module.exports) module.exports = { MODEL, SCHEMA, analyseShelfPhoto, toProducts, buildPrompt, buildJsonPrompt };
+if (typeof window !== 'undefined') window.PlanogramVision = { toProducts, buildJsonPrompt };

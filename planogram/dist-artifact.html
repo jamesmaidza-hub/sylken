@@ -1,0 +1,632 @@
+<title>Shelf Planner</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --ink:#1c2230; --mute:#6b7385; --line:#d9dde5; --accent:#2457d6; --warn:#b4540a; }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) { --bg:#12151c; --card:#1b2029; --ink:#e8ebf2; --mute:#98a1b5; --line:#2e3542; --accent:#6c93ff; --warn:#f0a35c; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; font:14px/1.45 system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:16px; border-bottom:1px solid var(--line); background:var(--card); }
+  h1 { margin:0; font-size:18px; }
+  header p { margin:2px 0 0; color:var(--mute); }
+  main { display:grid; grid-template-columns:300px 1fr; gap:16px; padding:16px; align-items:start; }
+  @media (max-width: 800px) { main { grid-template-columns:1fr; } }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px; }
+  .card h2 { margin:0 0 10px; font-size:13px; text-transform:uppercase; letter-spacing:.04em; color:var(--mute); }
+  label { display:flex; justify-content:space-between; align-items:center; gap:8px; margin:6px 0; }
+  input[type=number] { width:90px; padding:4px 6px; border:1px solid var(--line); border-radius:4px; background:var(--bg); color:var(--ink); }
+  button { padding:7px 12px; border:1px solid var(--line); border-radius:6px; background:var(--card); color:var(--ink); cursor:pointer; font:inherit; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+  .stats { display:flex; gap:20px; flex-wrap:wrap; margin-bottom:10px; }
+  .stat b { display:block; font-size:18px; }
+  .stat span { color:var(--mute); font-size:12px; }
+  #stage { overflow:auto; }
+  svg text { font-family:system-ui,sans-serif; }
+  table { border-collapse:collapse; width:100%; margin-top:10px; font-size:13px; }
+  th, td { text-align:left; padding:4px 6px; border-bottom:1px solid var(--line); }
+  .warn { color:var(--warn); }
+  #msg { color:var(--warn); margin-top:6px; min-height:1em; }
+  @media print { header, aside, .noprint { display:none !important; } main { display:block; padding:0; } .card { border:0; } }
+
+  :root[data-theme="dark"] { --bg:#12151c; --card:#1b2029; --ink:#e8ebf2; --mute:#98a1b5; --line:#2e3542; --accent:#6c93ff; --warn:#f0a35c; }
+  body { padding-block: 0; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  header { margin: 0 calc(-1 * max(16px, env(safe-area-inset-left, 0px))); padding-left: max(16px, env(safe-area-inset-left, 0px)); }
+  main { padding-left: 0; padding-right: 0; } input[type=text], input:not([type]) { min-width: 0; }
+  button, input[type=file] { min-height: 40px; }</style>
+
+<header>
+  <h1>Planogram Builder</h1>
+  <p>Load a product list, set the shelf size, and get a layout blocked by category with the fastest sellers at eye level.</p>
+</header>
+<main>
+  <aside>
+    <div class="card">
+      <h2>Fixture</h2>
+      <label>Bays <input type="number" id="bays" value="4" min="1"></label>
+      <label>Bay width (mm) <input type="number" id="bayWidth" value="1000" min="100"></label>
+      <label>Shelves <input type="number" id="shelves" value="5" min="1" max="10"></label>
+      <label>Shelf height (mm) <input type="number" id="shelfHeight" value="300" min="50"></label>
+      <label>Shelf depth (mm) <input type="number" id="shelfDepth" value="400" min="50"></label>
+      <label>Days of cover <input type="number" id="daysCover" value="7" min="1"></label>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Shelf photo</h2>
+      <input type="file" id="photo" accept="image/*" capture="environment">
+      <label style="margin-top:8px">Shelf run width (mm, optional) <input type="number" id="photoWidth" placeholder="e.g. 1200"></label>
+      <div class="row"><button class="primary" id="analyse">Read photo</button></div>
+      <div id="photoMsg" style="margin-top:6px;color:var(--mute);font-size:12px">Needs the server: <code>node server.js</code>, then open http://localhost:3100</div>
+    </div>
+    <div class="card" style="margin-top:12px">
+      <h2>Products</h2>
+      <input type="file" id="file" accept=".csv,text/csv">
+      <div class="row">
+        <button id="sample">Load sample data</button>
+        <button id="template">Download CSV template</button>
+      </div>
+      <p style="color:var(--mute);margin:8px 0 0;font-size:12px">Columns: sku, name, category, width, height, depth (mm), velocity (units per day). Optional: min facings, max facings.</p>
+      <div id="count" style="margin-top:6px"></div>
+      <div class="row"><button class="primary" id="go">Generate layout</button></div>
+      <div id="msg"></div>
+    </div>
+  </aside>
+  <section class="card">
+    <div class="stats" id="stats"></div>
+    <div id="review"></div>
+    <div id="stage"><p style="color:var(--mute)">Load a CSV or the sample data, then press Generate layout.</p></div>
+    <div class="row noprint" id="actions" hidden>
+      <button id="csv">Download layout CSV</button>
+      <button id="svg">Download SVG</button>
+      <button id="print">Print</button>
+    </div>
+    <div id="unplaced"></div>
+  </section>
+</main>
+
+<script>/* Planogram auto-layout engine. No dependencies; works in the browser and in Node.
+ *
+ * Fixture: `shelves` rows (top to bottom) of `bays * bayWidth` mm. Dimensions are mm, velocity is units/day.
+ * Steps: size facings from velocity -> shrink to fit -> block by category (vertical blocks)
+ * -> put the fastest sellers on the best shelves (eye and hand level).
+ */
+(function (root, factory) {
+  if (typeof module === 'object' && module.exports) module.exports = factory();
+  else root.Planogram = factory();
+})(typeof self !== 'undefined' ? self : this, function () {
+  const DEFAULTS = {
+    bays: 4,
+    bayWidth: 1000,
+    shelves: 5,
+    shelfHeights: null, // per shelf clearance in mm, top to bottom; default 300 each
+    shelfDepth: 400,
+    daysCover: 7, // days of sales to hold on the shelf
+    fillTarget: 0.9, // leave 10% of the width free for packing losses
+    shelfScores: null, // 0..1 value per shelf, top to bottom; default peaks at eye level
+  };
+
+  function num(v, fallback) {
+    const n = typeof v === 'number' ? v : parseFloat(v);
+    return Number.isFinite(n) ? n : fallback;
+  }
+
+  function normaliseProduct(p, i) {
+    const out = {
+      sku: String(p.sku != null && p.sku !== '' ? p.sku : 'P' + (i + 1)),
+      name: String(p.name || p.sku || 'Item ' + (i + 1)),
+      category: String(p.category || 'Uncategorised'),
+      width: num(p.width, 0),
+      height: num(p.height, 0),
+      depth: num(p.depth, 0),
+      velocity: Math.max(0, num(p.velocity, 0)),
+      minFacings: Math.max(1, Math.floor(num(p.minFacings, 1))),
+      maxFacings: Math.max(1, Math.floor(num(p.maxFacings, 8))),
+      unitsDeep: Math.max(0, Math.floor(num(p.unitsDeep, 0))), // known units per facing, e.g. counted from a photo
+    };
+    const fixed = Math.floor(num(p.fixedFacings, 0)); // keep exactly this many facings (e.g. as photographed)
+    if (fixed > 0) { out.minFacings = fixed; out.maxFacings = fixed; }
+    if (out.maxFacings < out.minFacings) out.maxFacings = out.minFacings;
+    return out;
+  }
+
+  function validate(p) {
+    if (!(p.width > 0) || !(p.height > 0) || !(p.depth > 0)) return 'missing or zero size';
+    return null;
+  }
+
+  function defaultScores(n) {
+    if (n === 1) return [1];
+    const s = [];
+    for (let i = 0; i < n; i++) s.push(Math.max(0.1, 1 - Math.abs(i / (n - 1) - 0.4) * 1.2));
+    return s;
+  }
+
+  function run(productsIn, o) {
+    const S = o.shelves;
+    const heights = o.shelfHeights && o.shelfHeights.length === S ? o.shelfHeights : Array(S).fill(300);
+    const scores = o.shelfScores && o.shelfScores.length === S ? o.shelfScores : defaultScores(S);
+    const rowLength = o.bays * o.bayWidth;
+    const maxHeight = Math.max.apply(null, heights);
+
+    const unplaced = [];
+    const items = [];
+    productsIn.map(normaliseProduct).forEach((p) => {
+      const bad = validate(p);
+      if (bad) return unplaced.push({ product: p, reason: bad });
+      if (p.height > maxHeight) return unplaced.push({ product: p, reason: 'taller than every shelf' });
+      if (p.width > rowLength) return unplaced.push({ product: p, reason: 'wider than the fixture' });
+      const deep = p.unitsDeep > 0 ? p.unitsDeep : Math.max(1, Math.floor(o.shelfDepth / p.depth));
+      const wanted = Math.ceil((p.velocity * o.daysCover) / deep);
+      p.unitsPerFacing = deep;
+      p.facings = Math.min(p.maxFacings, Math.max(p.minFacings, wanted, 1));
+      items.push(p);
+    });
+
+    // Shrink to fit: take a facing off whichever item has the most days of cover per width.
+    const budget = rowLength * S * o.fillTarget;
+    const used = () => items.reduce((a, p) => a + p.facings * p.width, 0);
+    const cover = (p, f) => (p.velocity > 0 ? (f * p.unitsPerFacing) / p.velocity : Infinity);
+    while (used() > budget) {
+      let best = null;
+      for (const p of items) {
+        if (p.facings > p.minFacings) {
+          const c = cover(p, p.facings - 1) / p.width; // cover left after the cut, per mm saved
+          if (!best || c > best.c) best = { p, c };
+        }
+      }
+      if (best) { best.p.facings--; continue; }
+      // everything is at its minimum: drop the slowest item
+      const slow = items.reduce((a, p) => (!a || p.velocity < a.velocity ? p : a), null);
+      if (!slow) break;
+      items.splice(items.indexOf(slow), 1);
+      unplaced.push({ product: slow, reason: 'no room (slowest seller dropped)' });
+    }
+
+    // Group by category, biggest sellers first; within a category fastest first.
+    const groups = {};
+    items.forEach((p) => (groups[p.category] = groups[p.category] || []).push(p));
+    const cats = Object.keys(groups).map((name) => {
+      const list = groups[name].sort((a, b) => b.velocity - a.velocity || a.name.localeCompare(b.name));
+      return { name, list, velocity: list.reduce((a, p) => a + p.velocity, 0), width: list.reduce((a, p) => a + p.facings * p.width, 0) };
+    }).sort((a, b) => b.velocity - a.velocity || a.name.localeCompare(b.name));
+
+    // Each shelf keeps its own cursor so category blocks stay in vertical columns.
+    const rowsByScore = scores.map((s, i) => i).sort((a, b) => scores[b] - scores[a]);
+    const placements = [];
+    const rowFill = Array(S).fill(0);
+    let cursor = 0;
+    const blocks = [];
+
+    for (const cat of cats) {
+      const widest = Math.max.apply(null, cat.list.map((p) => p.facings * p.width));
+      const start = cursor;
+      let span = Math.max(widest, Math.ceil(cat.width / S / o.fillTarget));
+      const rowEnd = () => Math.min(rowLength, start + span);
+      for (let attempt = 0; attempt < 3; attempt++) {
+        // Try the layout; if something doesn't fit in the span, widen it and retry.
+        const trial = Array(S).fill(start);
+        const placed = [];
+        let failed = false;
+        for (const p of cat.list) {
+          const w = p.facings * p.width;
+          let row = -1;
+          for (const r of rowsByScore) {
+            if (heights[r] >= p.height && trial[r] + w <= rowEnd() + 1e-6) { row = r; break; }
+          }
+          if (row < 0) { failed = true; break; }
+          placed.push({ product: p, row, x: trial[row], width: w, facings: p.facings });
+          trial[row] += w;
+        }
+        if (!failed) { placed.forEach((x) => placements.push(x)); trial.forEach((t, r) => (rowFill[r] = Math.max(rowFill[r], t))); break; }
+        span += Math.ceil(widest / 2);
+        if (attempt === 2 || start + span > rowLength) {
+          // Last resort: place what fits, report the rest.
+          const t2 = Array(S).fill(start);
+          for (const p of cat.list) {
+            const w = p.facings * p.width;
+            const row = rowsByScore.find((r) => heights[r] >= p.height && t2[r] + w <= rowLength + 1e-6 && t2[r] + w <= start + span + 1e-6);
+            if (row === undefined) { unplaced.push({ product: p, reason: 'no room left in the fixture' }); continue; }
+            placements.push({ product: p, row, x: t2[row], width: w, facings: p.facings });
+            t2[row] += w;
+          }
+          break;
+        }
+      }
+      blocks.push({ category: cat.name, x: start, width: Math.min(span, rowLength - start) });
+      cursor = Math.min(rowLength, start + span);
+    }
+
+    const placedWidth = placements.reduce((a, p) => a + p.width, 0);
+    const rows = [];
+    for (let r = 0; r < S; r++) rows.push({ index: r, height: heights[r], score: scores[r] });
+    const summary = {
+      products: productsIn.length,
+      placed: new Set(placements.map((p) => p.product.sku)).size,
+      unplaced: unplaced.length,
+      fixtureWidth: rowLength,
+      shelfSpace: rowLength * S,
+      usedSpace: placedWidth,
+      utilisation: placedWidth / (rowLength * S),
+      // velocity-weighted shelf score: higher means fast sellers sit on better shelves
+      attention: placements.reduce((a, p) => a + p.product.velocity * scores[p.row], 0) /
+        (placements.reduce((a, p) => a + p.product.velocity, 0) || 1),
+    };
+    placements.forEach((p) => {
+      p.daysCover = p.product.velocity > 0 ? (p.facings * p.product.unitsPerFacing) / p.product.velocity : null;
+    });
+    return { options: o, rows, blocks, placements, unplaced, summary };
+  }
+
+  // Column blocking wastes some width, so if items were dropped for lack of room, retry with a tighter budget.
+  function generate(productsIn, optsIn) {
+    const o = Object.assign({}, DEFAULTS, optsIn || {});
+    let fill = o.fillTarget, best = null;
+    for (let i = 0; i < 12 && fill >= 0.4; i++, fill -= 0.04) {
+      const layout = run(productsIn, Object.assign({}, o, { fillTarget: fill }));
+      if (!best || layout.unplaced.length < best.unplaced.length) best = layout;
+      if (!layout.unplaced.some((u) => /no room left/.test(u.reason))) break;
+    }
+    return best;
+  }
+
+  // --- CSV -------------------------------------------------------------------------------
+  function parseCsv(text) {
+    const rows = [];
+    let row = [], cell = '', q = false;
+    for (let i = 0; i < text.length; i++) {
+      const c = text[i];
+      if (q) {
+        if (c === '"' && text[i + 1] === '"') { cell += '"'; i++; }
+        else if (c === '"') q = false;
+        else cell += c;
+      } else if (c === '"') q = true;
+      else if (c === ',') { row.push(cell); cell = ''; }
+      else if (c === '\n' || c === '\r') {
+        if (c === '\r' && text[i + 1] === '\n') i++;
+        row.push(cell); cell = '';
+        if (row.some((x) => x.trim() !== '')) rows.push(row);
+        row = [];
+      } else cell += c;
+    }
+    row.push(cell);
+    if (row.some((x) => x.trim() !== '')) rows.push(row);
+    return rows;
+  }
+
+  const ALIASES = {
+    sku: ['sku', 'code', 'stock code', 'item code', 'id'],
+    name: ['name', 'description', 'product', 'item'],
+    category: ['category', 'group', 'department', 'class'],
+    width: ['width', 'w', 'width mm'],
+    height: ['height', 'h', 'height mm'],
+    depth: ['depth', 'd', 'depth mm', 'length'],
+    velocity: ['velocity', 'sales per day', 'units per day', 'daily sales', 'sales/day'],
+    minFacings: ['min facings', 'minfacings', 'min'],
+    maxFacings: ['max facings', 'maxfacings', 'max'],
+    fixedFacings: ['facings', 'fixed facings'],
+    unitsDeep: ['units deep', 'units per facing'],
+  };
+
+  function productsFromCsv(text) {
+    const table = parseCsv(text);
+    if (!table.length) return [];
+    const head = table[0].map((h) => h.trim().toLowerCase());
+    const col = {};
+    Object.keys(ALIASES).forEach((k) => {
+      const i = head.findIndex((h) => ALIASES[k].includes(h));
+      if (i >= 0) col[k] = i;
+    });
+    return table.slice(1).map((r) => {
+      const p = {};
+      Object.keys(col).forEach((k) => (p[k] = (r[col[k]] || '').trim()));
+      return p;
+    });
+  }
+
+  function layoutToCsv(layout) {
+    const esc = (v) => (/[",\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));
+    const lines = [['sku', 'name', 'category', 'shelf', 'x_mm', 'facings', 'units_per_facing', 'units', 'days_cover']];
+    layout.placements
+      .slice().sort((a, b) => a.row - b.row || a.x - b.x)
+      .forEach((p) => lines.push([p.product.sku, p.product.name, p.product.category, p.row + 1, Math.round(p.x), p.facings, p.product.unitsPerFacing, p.facings * p.product.unitsPerFacing, p.daysCover == null ? '' : p.daysCover.toFixed(1)]));
+    layout.unplaced.forEach((u) => lines.push([u.product.sku, u.product.name, u.product.category, '', '', '', '', '', 'UNPLACED: ' + u.reason]));
+    return lines.map((l) => l.map(esc).join(',')).join('\n') + '\n';
+  }
+
+  return { DEFAULTS, generate, parseCsv, productsFromCsv, layoutToCsv };
+});
+</script>
+<script>/* Reads a shelf photo with Claude and returns the products, facings and counts it can see. */
+const MODEL = 'claude-opus-5-5';
+
+const SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['shelf_count', 'products', 'notes'],
+  properties: {
+    shelf_count: { type: 'integer', description: 'Number of shelves visible, top to bottom' },
+    notes: { type: 'string', description: 'Anything the user should check: blurry areas, hidden items, guesses' },
+    products: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['name', 'category', 'shelf', 'position', 'facings', 'units_deep', 'width_mm', 'height_mm', 'depth_mm', 'confidence'],
+        properties: {
+          name: { type: 'string', description: 'Brand and product name as printed on the pack, with size if readable' },
+          category: { type: 'string', description: 'Short product category, e.g. "Pain relief"' },
+          shelf: { type: 'integer', description: 'Shelf number, 1 = top' },
+          position: { type: 'integer', description: 'Order left to right on that shelf, 1 = leftmost' },
+          facings: { type: 'integer', description: 'Number of packs side by side facing front' },
+          units_deep: { type: 'integer', description: 'Packs stacked behind each facing, estimated from shelf depth; 1 if unsure' },
+          width_mm: { type: 'number' },
+          height_mm: { type: 'number' },
+          depth_mm: { type: 'number' },
+          confidence: { type: 'string', enum: ['high', 'medium', 'low'] },
+        },
+      },
+    },
+  },
+};
+
+function buildPrompt(hints) {
+  const lines = [
+    'This is a photo of a retail shelf (a pharmacy or shop). List every distinct product you can see, so a planogram with quantities can be built from it.',
+    'Rules:',
+    '- One entry per product (same product on the same shelf = one entry with facings counted), shelves numbered from the top as 1.',
+    '- "facings" is how many packs sit side by side across the front. "units_deep" is how many packs are stacked behind each facing; use the shelf depth and pack size to estimate it, or 1 if you cannot tell.',
+    '- Estimate each pack\'s real width, height and depth in millimetres from its type and size.',
+    '- Do not invent products you cannot see. If a label is unreadable, describe the pack ("blue 100ml syrup bottle") and mark confidence low.',
+  ];
+  if (hints && hints.bayWidthMm) lines.push('- The shelf run in the photo is about ' + hints.bayWidthMm + ' mm wide; use it to scale pack sizes.');
+  if (hints && hints.shelves) lines.push('- The user says there are ' + hints.shelves + ' shelves.');
+  return lines.join('\n');
+}
+
+async function analyseShelfPhoto(client, image, hints) {
+  const m = /^data:(image\/(?:jpeg|png|gif|webp));base64,(.+)$/.exec(image || '');
+  if (!m) throw Object.assign(new Error('Send the photo as a JPEG, PNG, GIF or WebP data URL.'), { status: 400 });
+  const res = await client.messages.create({
+    model: MODEL,
+    max_tokens: 16000,
+    output_config: { effort: 'medium', format: { type: 'json_schema', schema: SCHEMA } },
+    messages: [{
+      role: 'user',
+      content: [
+        { type: 'image', source: { type: 'base64', media_type: m[1], data: m[2] } },
+        { type: 'text', text: buildPrompt(hints) },
+      ],
+    }],
+  });
+  if (res.stop_reason === 'refusal') throw Object.assign(new Error('The model declined to read this image.'), { status: 422 });
+  if (res.stop_reason === 'max_tokens') throw Object.assign(new Error('The shelf has too many products for one pass; try a closer photo of part of it.'), { status: 422 });
+  const text = res.content.filter((b) => b.type === 'text').map((b) => b.text).join('');
+  let data;
+  try { data = JSON.parse(text); } catch (e) { throw Object.assign(new Error('Could not read the model\'s answer.'), { status: 502 }); }
+  return data;
+}
+
+// Turn the model's list into engine products. Current stock is treated as the demand signal.
+function toProducts(analysis, daysCover) {
+  const cover = daysCover || 7;
+  return analysis.products.map((p, i) => {
+    const facings = Math.max(1, Math.round(p.facings));
+    const deep = Math.max(1, Math.round(p.units_deep));
+    return {
+      sku: 'PH' + String(i + 1).padStart(3, '0'),
+      name: p.name,
+      category: p.category,
+      width: p.width_mm, height: p.height_mm, depth: p.depth_mm,
+      fixedFacings: facings, unitsDeep: deep,
+      velocity: +((facings * deep) / cover).toFixed(2),
+      confidence: p.confidence,
+      shelfInPhoto: p.shelf,
+    };
+  });
+}
+
+// Same prompt, for runtimes that return JSON from plain text instead of a schema (the artifact's sample capability).
+function buildJsonPrompt(hints) {
+  return buildPrompt(hints) + '\n\nReply with only one JSON object, no other text, shaped like:\n' +
+    '{"shelf_count": 3, "notes": "", "products": [{"name": "Panado 500mg x24", "category": "Pain relief", "shelf": 1, "position": 1, "facings": 3, "units_deep": 4, "width_mm": 60, "height_mm": 110, "depth_mm": 40, "confidence": "high"}]}';
+}
+
+if (typeof module === 'object' && module.exports) module.exports = { MODEL, SCHEMA, analyseShelfPhoto, toProducts, buildPrompt, buildJsonPrompt };
+if (typeof window !== 'undefined') window.PlanogramVision = { toProducts, buildJsonPrompt };
+</script>
+<script>
+(function () {
+  const $ = (id) => document.getElementById(id);
+  let products = [], layout = null;
+
+  const PALETTE = ['#4f7cff','#e8743b','#2fa36b','#b05bd6','#d4a017','#16a7b8','#d6457a','#7a8a2e','#6b6fd6','#c25b3f'];
+
+  function sampleProducts() {
+    const cats = [['Cough & cold', 14], ['Pain relief', 16], ['Vitamins', 12], ['Skin care', 12], ['First aid', 10], ['Baby', 8]];
+    let seed = 7; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    const out = [];
+    cats.forEach(([cat, n], ci) => {
+      for (let i = 1; i <= n; i++) {
+        out.push({ sku: cat.slice(0, 3).toUpperCase() + i, name: cat + ' item ' + i, category: cat,
+          width: Math.round(40 + rnd() * 60), height: Math.round(70 + rnd() * 150), depth: Math.round(35 + rnd() * 80),
+          velocity: +(Math.pow(rnd(), 2.2) * 18 + 0.2).toFixed(2) });
+      }
+    });
+    return out;
+  }
+
+  function readOptions() {
+    const shelves = +$('shelves').value || 5;
+    return { bays: +$('bays').value || 1, bayWidth: +$('bayWidth').value || 1000, shelves,
+      shelfHeights: Array(shelves).fill(+$('shelfHeight').value || 300),
+      shelfDepth: +$('shelfDepth').value || 400, daysCover: +$('daysCover').value || 7 };
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, (c) => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;' }[c])); }
+
+  function drawSvg(l) {
+    const scale = 0.7, gap = 14, labelH = 22;
+    const W = l.summary.fixtureWidth * scale, rowH = (r) => l.rows[r].height * scale;
+    const tops = []; let y = labelH;
+    l.rows.forEach((r, i) => { tops.push(y); y += rowH(i) + gap; });
+    const H = y;
+    const cats = l.blocks.map((b) => b.category);
+    const colour = (c) => PALETTE[cats.indexOf(c) % PALETTE.length];
+    let s = `<svg xmlns="http://www.w3.org/2000/svg" width="${W + 40}" height="${H + 10}" viewBox="-30 0 ${W + 40} ${H + 10}">`;
+    l.blocks.forEach((b) => {
+      s += `<text x="${b.x * scale + 2}" y="14" font-size="11" fill="${colour(b.category)}" font-weight="600">${esc(b.category)}</text>`;
+    });
+    l.rows.forEach((r, i) => {
+      s += `<rect x="0" y="${tops[i]}" width="${W}" height="${rowH(i)}" fill="none" stroke="#8a93a6" stroke-width="0.5"/>`;
+      s += `<rect x="0" y="${tops[i] + rowH(i)}" width="${W}" height="3" fill="#8a93a6"/>`;
+      s += `<text x="-6" y="${tops[i] + rowH(i) / 2 + 4}" font-size="11" text-anchor="end" fill="#8a93a6">${i + 1}</text>`;
+    });
+    for (let b = 1; b < l.options.bays; b++) {
+      const x = b * l.options.bayWidth * scale;
+      s += `<line x1="${x}" y1="${labelH}" x2="${x}" y2="${H}" stroke="#8a93a6" stroke-dasharray="4 3"/>`;
+    }
+    l.placements.forEach((p) => {
+      const x = p.x * scale, w = p.width * scale, h = p.product.height * scale, y0 = tops[p.row] + rowH(p.row) - h;
+      const c = colour(p.product.category);
+      s += `<g><title>${esc(p.product.name)} (${esc(p.product.sku)}) — ${p.facings} facing(s), ${p.product.unitsPerFacing} deep, ${p.daysCover == null ? 'n/a' : p.daysCover.toFixed(1)} days cover</title>`;
+      s += `<rect x="${x + 0.5}" y="${y0}" width="${Math.max(1, w - 1)}" height="${h}" fill="${c}" fill-opacity="0.78" stroke="${c}"/>`;
+      for (let f = 1; f < p.facings; f++) {
+        const fx = x + f * p.product.width * scale;
+        s += `<line x1="${fx}" y1="${y0}" x2="${fx}" y2="${y0 + h}" stroke="#fff" stroke-opacity="0.7"/>`;
+      }
+      if (w > 28) s += `<text x="${x + 3}" y="${y0 + 12}" font-size="9" fill="#fff" style="pointer-events:none">${esc(p.product.sku)}${p.facings > 1 ? ' ×' + p.facings : ''}</text>`;
+      s += '</g>';
+    });
+    return s + '</svg>';
+  }
+
+  function render() {
+    const l = layout, sm = l.summary;
+    $('stats').innerHTML = [
+      [sm.placed + ' / ' + sm.products, 'products placed'],
+      [(sm.utilisation * 100).toFixed(0) + '%', 'shelf space used'],
+      [(sm.attention * 100).toFixed(0) + '%', 'placement score'],
+      [sm.unplaced, 'not placed'],
+    ].map(([v, k]) => `<div class="stat"><b>${v}</b><span>${k}</span></div>`).join('');
+    $('stage').innerHTML = drawSvg(l);
+    $('actions').hidden = false;
+    $('unplaced').innerHTML = l.unplaced.length
+      ? '<table><tr><th>Not placed</th><th>Reason</th></tr>' + l.unplaced.map((u) => `<tr><td>${esc(u.product.name)} (${esc(u.product.sku)})</td><td class="warn">${esc(u.reason)}</td></tr>`).join('') + '</table>'
+      : '';
+  }
+
+  // --- shelf photo -> products with quantities ---
+  function shrinkPhoto(file) {
+    return createImageBitmap(file).then((bmp) => {
+      const k = Math.min(1, 1568 / Math.max(bmp.width, bmp.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
+      c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+      return c;
+    });
+  }
+
+  function renderReview(notes) {
+    if (!products.length || !products[0].confidence) { $('review').innerHTML = ''; return; }
+    const total = products.reduce((a, p) => a + (+p.fixedFacings || 0) * (+p.unitsDeep || 0), 0);
+    $('review').innerHTML = '<h2 style="margin:0 0 6px;font-size:13px;text-transform:uppercase;letter-spacing:.04em;color:var(--mute)">Read from photo — check and correct</h2>' +
+      (notes ? '<p class="warn" style="margin:0 0 6px">' + esc(notes) + '</p>' : '') +
+      '<table><tr><th>Product</th><th>Category</th><th>Facings</th><th>Units deep</th><th>Units</th><th>Sure?</th><th></th></tr>' +
+      products.map((p, i) => '<tr><td><input data-i="' + i + '" data-k="name" value="' + esc(p.name) + '" style="width:100%"></td>' +
+        '<td><input data-i="' + i + '" data-k="category" value="' + esc(p.category) + '" style="width:100%"></td>' +
+        '<td><input type="number" min="1" data-i="' + i + '" data-k="fixedFacings" value="' + p.fixedFacings + '" style="width:60px"></td>' +
+        '<td><input type="number" min="1" data-i="' + i + '" data-k="unitsDeep" value="' + p.unitsDeep + '" style="width:60px"></td>' +
+        '<td>' + p.fixedFacings * p.unitsDeep + '</td>' +
+        '<td class="' + (p.confidence === 'high' ? '' : 'warn') + '">' + esc(p.confidence) + '</td>' +
+        '<td><button data-del="' + i + '">✕</button></td></tr>').join('') +
+      '<tr><td colspan="4"><b>Total on shelf</b></td><td><b>' + total + '</b></td><td colspan="2"></td></tr></table>';
+    $('review').dataset.notes = notes || '';
+  }
+
+  $('review').addEventListener('change', (e) => {
+    const t = e.target, i = +t.dataset.i;
+    if (t.dataset.k) {
+      const num = t.dataset.k === 'fixedFacings' || t.dataset.k === 'unitsDeep';
+      products[i][t.dataset.k] = num ? Math.max(1, Math.round(+t.value || 1)) : t.value;
+      products[i].velocity = +((products[i].fixedFacings * products[i].unitsDeep) / (+$('daysCover').value || 7)).toFixed(2);
+      renderReview($('review').dataset.notes);
+    }
+  });
+  $('review').addEventListener('click', (e) => {
+    if (e.target.dataset.del !== undefined) { products.splice(+e.target.dataset.del, 1); setProducts(products); renderReview($('review').dataset.notes); }
+  });
+
+  $('analyse').onclick = async () => {
+    const f = $('photo').files[0];
+    if (!f) { $('photoMsg').textContent = 'Choose or take a photo first.'; return; }
+    $('analyse').disabled = true; $('photoMsg').textContent = 'Reading the photo… this can take up to a minute.';
+    try {
+      const canvas = await shrinkPhoto(f);
+      const hints = { bayWidthMm: +$('photoWidth').value || undefined };
+      const daysCover = +$('daysCover').value || 7;
+      let json;
+      const sample = window.claude ? await window.claude.use('sample') : null;
+      if (sample) {
+        // Inside a published artifact: ask Claude through the viewer's own account, no server needed.
+        const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+        const analysis = await sample.json(PlanogramVision.buildJsonPrompt(hints), { images: blob, cache: false });
+        if (!analysis || !Array.isArray(analysis.products)) throw new Error('Claude did not return a product list. Try again with a closer photo.');
+        json = { analysis, products: PlanogramVision.toProducts(analysis, daysCover) };
+      } else {
+        const res = await fetch('/api/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ image: canvas.toDataURL('image/jpeg', 0.85), daysCover, hints }) });
+        json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed');
+      }
+      setProducts(json.products);
+      if (json.analysis.shelf_count > 0) $('shelves').value = json.analysis.shelf_count;
+      if (+$('photoWidth').value > 0) { $('bays').value = 1; $('bayWidth').value = +$('photoWidth').value; }
+      renderReview(json.analysis.notes);
+      $('photoMsg').textContent = json.products.length + ' products found. Correct anything wrong, then Generate layout.';
+    } catch (e) {
+      const copy = { not_granted: 'Allow Claude for this page to read photos.', rate_limited: 'Too many requests. Wait a minute and try again.', image_rejected: 'That photo could not be used. Try a different one.', refused: 'Claude declined this photo.', invalid_json: 'Claude\'s answer could not be read. Try again.', upstream_error: 'Connection problem. Try again.' };
+      $('photoMsg').textContent = copy[e && e.code] || (e && e.message === 'Failed to fetch' || /JSON/.test((e && e.message) || '') ? 'Could not reach the server. Run node server.js and open http://localhost:3100.' : (e && e.message) || 'Something went wrong.');
+    } finally { $('analyse').disabled = false; }
+  };
+
+  function download(name, text, type) {
+    if (window.claude) {
+      // Inside an artifact, plain download links are blocked; use the downloads capability.
+      window.claude.use('downloads').then((d) => {
+        if (d) return d.save({ filename: name, data: text }).catch(() => {});
+        navigator.clipboard && navigator.clipboard.writeText(text).catch(() => {});
+      });
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type }));
+    a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function setProducts(list) {
+    products = list;
+    $('count').textContent = list.length + ' products loaded';
+    $('msg').textContent = '';
+  }
+
+  $('sample').onclick = () => { setProducts(sampleProducts()); renderReview(); };
+  $('file').onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    f.text().then((t) => {
+      const list = Planogram.productsFromCsv(t);
+      if (!list.length) { $('msg').textContent = 'No rows found in that file.'; return; }
+      setProducts(list);
+    });
+  };
+  $('template').onclick = () => download('planogram-template.csv',
+    'sku,name,category,width,height,depth,velocity,min facings,max facings\nA001,Paracetamol 500mg x24,Pain relief,60,110,40,6,1,6\n', 'text/csv');
+  $('go').onclick = () => {
+    if (!products.length) { $('msg').textContent = 'Load a CSV or the sample data first.'; return; }
+    layout = Planogram.generate(products, readOptions());
+    render();
+  };
+  $('csv').onclick = () => layout && download('planogram-layout.csv', Planogram.layoutToCsv(layout), 'text/csv');
+  $('svg').onclick = () => layout && download('planogram.svg', drawSvg(layout), 'image/svg+xml');
+  if (window.claude) $('print').hidden = true; else $('print').onclick = () => window.print();
+})();
+</script>

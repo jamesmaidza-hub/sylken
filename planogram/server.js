@@ -6,7 +6,7 @@ const path = require('node:path');
 const { analyseShelfPhoto, toProducts } = require('./vision.js');
 
 const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
-const STATIC = new Set(['index.html', 'engine.js']);
+const STATIC = new Set(['index.html', 'engine.js', 'vision.js']);
 
 function createServer(client) {
   return http.createServer(async (req, res) => {

@@ -84,6 +84,7 @@
   </section>
 </main>
 <script src="engine.js"></script>
+<script src="vision.js"></script>
 <script>
 (function () {
   const $ = (id) => document.getElementById(id);
@@ -172,7 +173,7 @@
       const c = document.createElement('canvas');
       c.width = Math.round(bmp.width * k); c.height = Math.round(bmp.height * k);
       c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
-      return c.toDataURL('image/jpeg', 0.85);
+      return c;
     });
   }
 
@@ -211,22 +212,43 @@
     if (!f) { $('photoMsg').textContent = 'Choose or take a photo first.'; return; }
     $('analyse').disabled = true; $('photoMsg').textContent = 'Reading the photo… this can take up to a minute.';
     try {
-      const image = await shrinkPhoto(f);
-      const res = await fetch('/api/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ image, daysCover: +$('daysCover').value || 7, hints: { bayWidthMm: +$('photoWidth').value || undefined } }) });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || 'Failed');
+      const canvas = await shrinkPhoto(f);
+      const hints = { bayWidthMm: +$('photoWidth').value || undefined };
+      const daysCover = +$('daysCover').value || 7;
+      let json;
+      const sample = window.claude ? await window.claude.use('sample') : null;
+      if (sample) {
+        // Inside a published artifact: ask Claude through the viewer's own account, no server needed.
+        const blob = await new Promise((r) => canvas.toBlob(r, 'image/jpeg', 0.85));
+        const analysis = await sample.json(PlanogramVision.buildJsonPrompt(hints), { images: blob, cache: false });
+        if (!analysis || !Array.isArray(analysis.products)) throw new Error('Claude did not return a product list. Try again with a closer photo.');
+        json = { analysis, products: PlanogramVision.toProducts(analysis, daysCover) };
+      } else {
+        const res = await fetch('/api/analyze', { method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ image: canvas.toDataURL('image/jpeg', 0.85), daysCover, hints }) });
+        json = await res.json();
+        if (!res.ok) throw new Error(json.error || 'Failed');
+      }
       setProducts(json.products);
       if (json.analysis.shelf_count > 0) $('shelves').value = json.analysis.shelf_count;
       if (+$('photoWidth').value > 0) { $('bays').value = 1; $('bayWidth').value = +$('photoWidth').value; }
       renderReview(json.analysis.notes);
       $('photoMsg').textContent = json.products.length + ' products found. Correct anything wrong, then Generate layout.';
     } catch (e) {
-      $('photoMsg').textContent = e.message === 'Failed to fetch' || /JSON/.test(e.message) ? 'Could not reach the server. Run node server.js and open http://localhost:3100.' : e.message;
+      const copy = { not_granted: 'Allow Claude for this page to read photos.', rate_limited: 'Too many requests. Wait a minute and try again.', image_rejected: 'That photo could not be used. Try a different one.', refused: 'Claude declined this photo.', invalid_json: 'Claude\'s answer could not be read. Try again.', upstream_error: 'Connection problem. Try again.' };
+      $('photoMsg').textContent = copy[e && e.code] || (e && e.message === 'Failed to fetch' || /JSON/.test((e && e.message) || '') ? 'Could not reach the server. Run node server.js and open http://localhost:3100.' : (e && e.message) || 'Something went wrong.');
     } finally { $('analyse').disabled = false; }
   };
 
   function download(name, text, type) {
+    if (window.claude) {
+      // Inside an artifact, plain download links are blocked; use the downloads capability.
+      window.claude.use('downloads').then((d) => {
+        if (d) return d.save({ filename: name, data: text }).catch(() => {});
+        navigator.clipboard && navigator.clipboard.writeText(text).catch(() => {});
+      });
+      return;
+    }
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], { type }));
     a.download = name; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
@@ -256,7 +278,7 @@
   };
   $('csv').onclick = () => layout && download('planogram-layout.csv', Planogram.layoutToCsv(layout), 'text/csv');
   $('svg').onclick = () => layout && download('planogram.svg', drawSvg(layout), 'image/svg+xml');
-  $('print').onclick = () => window.print();
+  if (window.claude) $('print').hidden = true; else $('print').onclick = () => window.print();
 })();
 </script>
 </body>
