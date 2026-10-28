@@ -17,6 +17,8 @@ export interface Settings {
   /** The most change the till will give on one sale, to catch a mistyped amount. 0 = no limit. */
   maxChange: number
   vatNumber: string | null
+  /** The pharmacy's practice (BHF) number with the medical aids, for claims. */
+  practiceNo: string | null
   receiptFooter: string | null
   timezone: string
   dispensingFee: number
@@ -51,6 +53,7 @@ export async function getSettings(tx: Tx): Promise<Settings> {
     cashDropLimit: num(s.cash_drop_limit),
     maxChange: num(s.max_change),
     vatNumber: s.vat_number,
+    practiceNo: s.practice_no,
     receiptFooter: s.receipt_footer,
     timezone: s.timezone,
     dispensingFee: num(s.dispensing_fee),
@@ -79,6 +82,7 @@ const columns: Record<keyof Settings, string> = {
   cashDropLimit: 'cash_drop_limit',
   maxChange: 'max_change',
   vatNumber: 'vat_number',
+  practiceNo: 'practice_no',
   receiptFooter: 'receipt_footer',
   timezone: 'timezone',
   dispensingFee: 'dispensing_fee',

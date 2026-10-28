@@ -174,6 +174,9 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['POST', '/dispensary/settings/aids', 'rx.settings'],
   ['POST', '/dispensary/settings/aids/:id', 'rx.settings'],
   ['POST', '/dispensary/settings/directions', 'rx.settings'],
+  ['GET', '/dispensary/claims', 'rx.claims'],
+  ['POST', '/dispensary/claims', 'rx.claims'],
+  ['GET', '/dispensary/claims/:id/xml', 'rx.claims'],
 
   // JSON API
   ['GET', '/api/items/lookup', 'items.view'],

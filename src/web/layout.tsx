@@ -37,6 +37,7 @@ const navGroups: { slug: string; label: string; hue: string; icon: string; items
     ['', 'Owed items', '/dispensary/owed', 'rx.view'],
     ['', 'Script book', '/dispensary/scripts', 'rx.view'],
     ['', 'Register', '/dispensary/register', 'rx.view'],
+    ['', 'Medical aid claims', '/dispensary/claims', 'rx.claims'],
     ['', 'Doctors', '/dispensary/doctors', 'rx.view'],
     ['', 'Dispensers', '/dispensary/dispensers', 'users.manage'],
   ] },

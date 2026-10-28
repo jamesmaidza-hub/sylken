@@ -43,6 +43,7 @@ export const permissions = {
   'rx.flags.remove': 'Remove an allergy or alert from a patient',
   'rx.reports': 'Dispensary reports with no patient names (drug usage, script totals)',
   'rx.settings': 'Dispensary settings, medical aids and label directions',
+  'rx.claims': 'Make and download medical aid claim files',
   'settings.manage': 'Shop settings and quick buttons',
   'users.manage': 'Add users, set roles, unlock and reset logins',
   'audit.view': 'Read the audit log',
@@ -57,7 +58,7 @@ export const rolePermissions: Record<Role, readonly Permission[]> = {
   supervisor: [...everyone, 'items.edit', 'stock.receive', 'stock.adjust', 'stock.reports', 'cashup.manage', 'sales.view', 'till.approve'],
   dispenser: [...everyone, 'stock.receive', 'rx.view', 'rx.capture', 'rx.dispense'],
   pharmacist: [...everyone, 'items.edit', 'stock.receive', 'stock.reports', 'accounts.manage', 'sales.view',
-    'rx.view', 'rx.capture', 'rx.dispense', 'rx.override', 'rx.check', 'rx.reverse', 'rx.flags.remove', 'rx.reports', 'rx.settings'],
+    'rx.view', 'rx.capture', 'rx.dispense', 'rx.override', 'rx.check', 'rx.reverse', 'rx.flags.remove', 'rx.reports', 'rx.settings', 'rx.claims'],
   manager: [...everyone, 'items.edit', 'stock.receive', 'stock.adjust', 'stock.reports', 'cashup.manage', 'accounts.manage',
     'sales.view', 'rx.reports', 'rx.settings', 'settings.manage', 'users.manage', 'audit.view', 'till.approve'],
 }
