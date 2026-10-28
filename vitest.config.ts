@@ -2,6 +2,8 @@ import { defineConfig } from 'vitest/config'
 
 export default defineConfig({
   test: {
+    // planogram/ is a separate app whose tests run under node:test, not vitest.
+    include: ['test/**/*.test.ts'],
     globalSetup: './test/global-setup.ts',
     fileParallelism: false,
     testTimeout: 60_000,
