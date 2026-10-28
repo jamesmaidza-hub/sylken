@@ -1116,6 +1116,7 @@ export function dispensaryRoutes() {
           <label>Label footer<input name="labelFooter" value={d.s.labelFooter ?? ''} /></label>
           <label>Shop address (on labels)<input name="address" value={d.shop.address ?? ''} /></label>
           <label>Shop phone (on labels)<input name="phone" value={d.shop.phone ?? ''} /></label>
+          <label>Practice number with the medical aids (on claims)<input name="practiceNo" value={d.s.practiceNo ?? ''} /></label>
           <div><button>Save</button></div>
         </form>
         <p class="hint">The next script number can only go up, so numbering can carry on from Compharm's. Which schedules must go in the register is for the pharmacist to confirm against Botswana's rules.</p>
@@ -1126,7 +1127,7 @@ export function dispensaryRoutes() {
           <tbody>{d.aids.map((a) => (
             <tr><td colspan={4}>
               <form method="post" action={`/dispensary/settings/aids/${a.id}`} class="row">
-                <input name="name" value={a.name} required /><input name="code" value={a.code ?? ''} placeholder="code" style="width:100px" />
+                <input name="name" value={a.name} required /><input name="code" value={a.code ?? ''} placeholder="scheme code" style="width:110px" />
                 <input name="message" value={a.message ?? ''} placeholder="Shown on every script for its members" style="flex:1" />
                 <label class="row" style="flex-direction:row"><input type="checkbox" name="inactive" checked={!a.active} /> inactive</label>
                 <button class="secondary">Save</button>
@@ -1134,8 +1135,10 @@ export function dispensaryRoutes() {
           ))}</tbody>
         </table></div>
         <form method="post" action="/dispensary/settings/aids" class="row panel">
-          <input name="name" required placeholder="e.g. BOMAid" /><input name="code" placeholder="code" style="width:100px" /><button>Add medical aid</button>
+          <input name="name" required placeholder="e.g. BOMAid" /><input name="code" placeholder="scheme code" style="width:110px" /><button>Add medical aid</button>
         </form>
+
+        <p class="hint">The scheme code is the medical aid's own code for itself, put on every claim file. Ask the medical aid or its administrator for it.</p>
 
         <h2>Label directions</h2>
         <p class="muted">Type a code on a script line and it becomes the text. Clear the text to delete a code.</p>
@@ -1165,6 +1168,7 @@ export function dispensaryRoutes() {
       await updateSettings(tx, {
         dispensingFee: Math.round(nums.fee * 100) / 100, defaultSupplyDays: Math.round(nums.supplyDays), repeatValidDays: Math.round(nums.repeatDays),
         labelWidthMm: Math.round(nums.w), labelHeightMm: Math.round(nums.h), labelFooter: str(b.labelFooter) || null,
+        practiceNo: str(b.practiceNo) || null,
       }, c.get('user').userId)
       await tx`update tenant_settings set register_schedules = ${[...new Set(schedules)].sort()}::smallint[]`
       await updateShop(tx, { address: str(b.address) || null, phone: str(b.phone) || null })

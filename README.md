@@ -43,6 +43,13 @@ Built so far: **stage 1, items and stock**, **stage 2, till and cash-up**, and *
 - **At the till**, F2 brings a script in by number with the medical aid share already taken; the patient pays the rest by any tender, or on their account.
 - **Script book** and the **register of scheduled medicines** (from the stock ledger, with patient, ID, address, doctor and running balance), both with CSV.
 
+## What stage 4 starts: medical aid claim files
+
+- **Claim files** (Dispensary → Medical aid claims): pick the medical aid and the dispensing days, and sylken lists every dispensed script billed to it, ready or with what must be fixed first (no NAPPI code on a line, no practice number for the doctor, no date of birth, no member number). One button makes the batch file and keeps it for download.
+- **Format**: Allegra Connect XML for batch claim submissions (v1.09), the format AFA sent for Pula Medical Aid Fund: one `<ClaimBatch>` with a header, a `<Claim>` per script (provider type BP, the pharmacy's practice number, the prescriber's practice number, membership, totals, NAPPI lines with quantity, days supplied, dispensing fee, VAT and ICD-10 codes) and a trailer. Files are named like `ClaimsFile28102026_001.xml`.
+- **Each script is claimed once.** Lines marked "patient pays" stay out. A script reversed after it was sent goes in the next file as a reversal. A test file is marked `testClaim=true` and doesn't count as claimed, so it can be made as often as needed. Files are never changed once made.
+- **Set up**: the pharmacy's practice number and each medical aid's scheme code go in Dispensing settings.
+
 ## Checked against Compharm
 
 Loaded with the Friends Pharmacy exports of 30 Sep and 8 Oct 2026:

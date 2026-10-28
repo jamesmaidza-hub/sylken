@@ -34,7 +34,7 @@ describe('web', () => {
       '/till/', '/till/app.js', '/till/sw.js', '/cashup', '/cashup/problems', '/sales', '/accounts', '/accounts/aging', '/reports/sales', '/reports/sales-gp',
       '/reports/sales?format=csv', '/reports/sales-gp?format=csv', '/dispensary', '/dispensary?q=smith', '/dispensary/patients/new',
       '/dispensary/scripts', '/dispensary/scripts?format=csv', '/dispensary/owed', '/dispensary/register', '/dispensary/register?format=csv',
-      '/dispensary/doctors', '/dispensary/dispensers', '/dispensary/settings', '/dispensary/scripts?format=xlsx', '/dispensary/register?format=xlsx', '/reports/rx', '/sales?from=2026-01-01']) {
+      '/dispensary/doctors', '/dispensary/dispensers', '/dispensary/settings', '/dispensary/claims', '/dispensary/scripts?format=xlsx', '/dispensary/register?format=xlsx', '/reports/rx', '/sales?from=2026-01-01']) {
       const res = await get(p)
       expect(res.status, p).toBe(200)
     }
