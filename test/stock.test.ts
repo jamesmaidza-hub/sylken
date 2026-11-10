@@ -6,7 +6,9 @@ import { applyMinMaxSuggestions, minMaxOrderReport, setMinMax, suggestMinMax } f
 import { addInvoiceLine, createInvoice, createSupplier, getInvoice, postInvoice } from '../src/domain/receiving.js'
 import { updateSettings } from '../src/domain/settings.js'
 import { adjustStock, postMovements } from '../src/domain/stock.js'
-import { postStockTake, recordCount, startStockTake, stockTakeSummary } from '../src/domain/stocktake.js'
+import {
+  addScanUpload, discardScanUpload, postStockTake, recordCount, scanUploadPreview, startStockTake, stockTakeSummary, uploadScanFile,
+} from '../src/domain/stocktake.js'
 import { purgeTenant } from '../src/domain/tenants.js'
 import { adminDb, appDb, newTenant } from './helpers.js'
 
@@ -133,6 +135,46 @@ describe('stock take', () => {
     await t.as((tx) => postStockTake(tx, st))
     expect((await t.as((tx) => getItem(tx, i.id)))!.onHandUnits).toBe(37)               // 50 - 5 sold - 8 short
     await expect(t.as((tx) => recordCount(tx, st, i.id, 1))).rejects.toThrow(/closed/)
+  })
+})
+
+describe('handheld scanner uploads', () => {
+  it('checks a file before counting it, counts it once, and leaves stock alone until the count is posted', async () => {
+    const a = await item('6001111111116')           // barcode as stock code
+    const b = await item('SCAN-B')
+    await t.as((tx) => postMovements(tx, [{ itemId: a.id, kind: 'opening', qtyUnits: 50 }, { itemId: b.id, kind: 'opening', qtyUnits: 10 }]))
+    const st = await t.as((tx) => startStockTake(tx, { name: 'Handheld' }))
+    await t.as((tx) => recordCount(tx, st, a.id, 5, 'add'))                          // counted by hand first
+    const text = 'Barcode,Qty\r\n6001111111116,2\r\nSCAN-B,1\r\n9999999999994,7\r\n6001111111116,1\r\n'
+    const up = await t.as((tx) => uploadScanFile(tx, st, { name: 'DATA.TXT', text }, { qtyUnit: 'packs', mode: 'add' }, t.userId))
+
+    const p = (await t.as((tx) => scanUploadPreview(tx, up)))!
+    expect(p.status).toBe('pending')
+    expect(p.unknown.map((u) => u.code)).toEqual(['9999999999994'])
+    const la = p.lines.find((l) => l.itemId === a.id)!
+    expect([la.units, la.countedBefore, la.countedAfter]).toEqual([30, 5, 35])       // 3 packs of 10, plus the 5 by hand
+    // Nothing is counted until someone adds it.
+    expect((await t.as((tx) => stockTakeSummary(tx, st)))!.lines.find((l) => l.itemId === b.id)!.countedUnits).toBeNull()
+
+    expect(await t.as((tx) => addScanUpload(tx, up, t.userId))).toEqual({ items: 2, unknown: 1 })
+    const sum = (await t.as((tx) => stockTakeSummary(tx, st)))!
+    expect(sum.lines.find((l) => l.itemId === a.id)!.countedUnits).toBe(35)
+    expect(sum.lines.find((l) => l.itemId === b.id)!.countedUnits).toBe(10)
+    expect((await t.as((tx) => getItem(tx, a.id)))!.onHandUnits).toBe(50)          // stock untouched until posting
+
+    await expect(t.as((tx) => addScanUpload(tx, up))).rejects.toThrow(/already added/)
+    await expect(t.as((tx) => uploadScanFile(tx, st, { name: 'copy.txt', text }, { qtyUnit: 'packs', mode: 'add' }))).rejects.toThrow(/counted twice|already added/)
+    // The file is kept as a record and can't be rewritten.
+    await expect(t.as((tx) => tx`update stock_take_uploads set raw_text = 'x' where id = ${up}`)).rejects.toThrow(/never changes/)
+    await expect(t.as((tx) => tx`delete from stock_take_uploads where id = ${up}`)).rejects.toThrow(/never deleted/)
+
+    const other = await t.as((tx) => uploadScanFile(tx, st, { name: 'b.txt', text: 'SCAN-B,4' }, { qtyUnit: 'units', mode: 'set' }))
+    await t.as((tx) => discardScanUpload(tx, other))
+    expect((await t.as((tx) => stockTakeSummary(tx, st)))!.lines.find((l) => l.itemId === b.id)!.countedUnits).toBe(10)
+
+    await t.as((tx) => postStockTake(tx, st))
+    expect((await t.as((tx) => getItem(tx, a.id)))!.onHandUnits).toBe(35)
+    await expect(t.as((tx) => uploadScanFile(tx, st, { name: 'late.txt', text: 'SCAN-B,1' }, { qtyUnit: 'packs', mode: 'add' }))).rejects.toThrow(/closed/)
   })
 })
 
