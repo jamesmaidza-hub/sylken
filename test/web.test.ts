@@ -40,6 +40,27 @@ describe('web', () => {
     }
   })
 
+  it('uploads a CipherLab scanner file into a stock take and adds it after checking', async () => {
+    const { t, cookie, get, post } = await loggedIn()
+    const i = await t.as((tx) => createItem(tx, { stockCode: 'HH-1', description: 'Handheld item', packSize: 1, costPerPack: 5 }))
+    const st = (await post('/stocktakes', { name: 'Shelf count', binId: '' })).headers.get('location')!
+    expect(await (await get(st)).text()).toContain('Handheld scanner file')
+    const form = new FormData()
+    form.set('file', new File(['HH-1,4\r\nHH-1,2\r\nNOPE-9,1\r\n'], 'DATA.TXT', { type: 'text/plain' }))
+    form.set('qtyUnit', 'packs')
+    form.set('mode', 'add')
+    const up = await createApp(db).request(`${st}/upload`, { method: 'POST', headers: { cookie }, body: form })
+    const preview = up.headers.get('location')!
+    expect(preview).toMatch(/\/uploads\//)
+    const html = await (await get(preview)).text()
+    expect(html).toContain('Handheld item')
+    expect(html).toContain('NOPE-9')
+    const added = await post(`${preview}/add`, {})
+    expect(new URL(added.headers.get('location')!, 'http://x').searchParams.get('ok')).toMatch(/Added counts for 1 items/)
+    const [line] = await t.as((tx) => tx`select counted_units from stock_take_lines where item_id = ${i.id}`)
+    expect(line.counted_units).toBe(6)
+  })
+
   it('adds a dispenser with a staff code from the Dispensary menu', async () => {
     const { t, get, post } = await loggedIn()
     const menu = await (await get('/menu/dispensary')).text()

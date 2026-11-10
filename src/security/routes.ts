@@ -67,6 +67,10 @@ export const routePermissions: [method: 'GET' | 'POST', path: string, rule: Rule
   ['POST', '/stocktakes/:id/count', 'stock.adjust'],
   ['POST', '/stocktakes/:id/post', 'stock.adjust'],
   ['POST', '/stocktakes/:id/cancel', 'stock.adjust'],
+  ['POST', '/stocktakes/:id/upload', 'stock.adjust'],
+  ['GET', '/stocktakes/:id/uploads/:upload', 'stock.adjust'],
+  ['POST', '/stocktakes/:id/uploads/:upload/add', 'stock.adjust'],
+  ['POST', '/stocktakes/:id/uploads/:upload/discard', 'stock.adjust'],
 
   // Stock and sales reports
   ['GET', '/reports', 'stock.reports'],
