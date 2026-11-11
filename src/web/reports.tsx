@@ -8,6 +8,7 @@ import { rangeFrom, RangeForm } from './cashup.js'
 import { back, page, run, type Env } from './app.js'
 import { rxReportList, rxReportRoutes } from './rxreports.js'
 import { tillReportList, tillReportRoutes } from './tillreports.js'
+import { tierRoutes } from './tiers.js'
 import { dateTime, money, qty } from './layout.js'
 
 import { csv, download, formatHref } from './export.js'
@@ -24,6 +25,8 @@ export function reportRoutes() {
           ['/reports/sales-gp', 'Sales GP per item', 'What sold, at what margin, and discounts given'],
           ['/cashup', 'Cash-up', 'Cash analysis per till run, payments, bank deposit and turnover'],
           ['/accounts/aging', 'Debtors age analysis', 'What customer accounts owe, by age'],
+          ['/reports/tiers', 'Stock usage tiers', 'A, B and C items by profit, usage a month, days of cover and out of stock'],
+          ['/reports/tiers/order', 'Weekly order', 'What to order within a budget, tier A first, best profit first'],
           ['/reports/minmax', 'Min/max order', 'Items at or below minimum, with order quantities'],
           ['/reports/minmax/suggest', 'Min/max from usage', 'Suggested levels from average daily sales'],
           ['/reports/valuation', 'Stock value', 'Stock on hand at cost and at retail'],
@@ -47,6 +50,7 @@ export function reportRoutes() {
 
   r.route('/rx', rxReportRoutes())
   r.route('/till', tillReportRoutes())
+  r.route('/tiers', tierRoutes())
 
   r.get('/minmax', async (c) => {
     const bin = c.req.query('bin') || undefined

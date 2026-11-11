@@ -97,17 +97,18 @@ export async function importedPeriods(tx: Tx): Promise<ImportedPeriod[]> {
   return rows.map((r) => ({ label: r.source as string, from: r.f as string, to: r.t as string, items: r.n as number }))
 }
 
-export async function abcRanking(
-  tx: Tx,
-  opts: { source: AbcSource; basis: AbcBasis; aPct: number /* top % of items */; bPct: number /* cumulative % of items */; status?: string[] },
-): Promise<AbcResult> {
-  const statuses = opts.status ?? ['active', 'quarantined']
-  let period: string
-  let sold
-  if (opts.source.kind === 'live') {
-    const since = new Date(Date.now() - opts.source.days * 86_400_000)
-    period = `last ${opts.source.days} days of trading`
-    sold = await tx`
+/** One item's sales over the period, from either source. */
+export interface Sold { item_id: string; qty: unknown; excl: unknown; cost: unknown }
+
+/**
+ * What each item sold over the period: own trading (till sales that are not scripts, plus dispensed
+ * scripts, so a script paid at the till is counted once) or an imported snapshot. Also says how many
+ * days the period covers, for rates per day and per month.
+ */
+export async function soldByItem(tx: Tx, source: AbcSource): Promise<{ sold: Sold[]; period: string; days: number }> {
+  if (source.kind === 'live') {
+    const since = new Date(Date.now() - source.days * 86_400_000)
+    const sold = await tx`
       select item_id, sum(qty) as qty, sum(excl) as excl, sum(cost) as cost from (
         select sl.item_id, sl.qty_units as qty, sl.line_total - sl.line_vat as excl, sl.qty_units * coalesce(sl.unit_cost, 0) as cost
           from sale_lines sl join sales s on s.id = sl.sale_id
@@ -117,13 +118,27 @@ export async function abcRanking(
           from script_lines l join scripts sc on sc.id = l.script_id
          where sc.status = 'dispensed' and sc.dispensed_at >= ${since}
       ) x group by item_id`
-  } else {
-    const [p] = await tx`select min(period_from)::text as f, max(period_to)::text as t from abc_sales_snapshot where source = ${opts.source.label}`
-    period = p?.f ? `${p.f} to ${p.t}, imported (${opts.source.label})` : `imported (${opts.source.label})`
-    sold = await tx`
-      select item_id, sum(qty_units) as qty, sum(sales_excl) as excl, sum(cost) as cost
-        from abc_sales_snapshot where source = ${opts.source.label} group by item_id`
+    return { sold: sold as unknown as Sold[], period: `last ${source.days} days of trading`, days: source.days }
   }
+  const [p] = await tx`
+    select min(period_from)::text as f, max(period_to)::text as t, (max(period_to) - min(period_from) + 1)::int as days
+      from abc_sales_snapshot where source = ${source.label}`
+  const sold = await tx`
+    select item_id, sum(qty_units) as qty, sum(sales_excl) as excl, sum(cost) as cost
+      from abc_sales_snapshot where source = ${source.label} group by item_id`
+  return {
+    sold: sold as unknown as Sold[],
+    period: p?.f ? `${p.f} to ${p.t}, imported (${source.label})` : `imported (${source.label})`,
+    days: (p?.days as number | null) ?? 30,
+  }
+}
+
+export async function abcRanking(
+  tx: Tx,
+  opts: { source: AbcSource; basis: AbcBasis; aPct: number /* top % of items */; bPct: number /* cumulative % of items */; status?: string[] },
+): Promise<AbcResult> {
+  const statuses = opts.status ?? ['active', 'quarantined']
+  const { sold, period } = await soldByItem(tx, opts.source)
   const by = new Map(sold.map((r) => [r.item_id as string, r]))
 
   const items = await tx`
