@@ -1,16 +1,30 @@
 import { Hono } from 'hono'
+import { defaultBackupDir, readStatus } from '../backup/backup.js'
 import { findByCode, repriceItems } from '../domain/items.js'
 import { buttonColors, getSettings, parseTillButtons, updateSettings } from '../domain/settings.js'
 import { back, page, run, type Env } from './app.js'
+import { dateTime } from './layout.js'
 
 export function settingsRoutes() {
   const r = new Hono<Env>()
 
   r.get('/', async (c) => {
     const s = await run(c, getSettings)
+    const backup = await readStatus(defaultBackupDir())
+    const last = backup.lastSuccess
+    const hours = last ? (Date.now() - new Date(last.at).getTime()) / 3_600_000 : null
     return page(c, 'Settings', (
       <>
         <h1>Shop settings</h1>
+        <div class={`panel ${hours === null || hours > 36 || !last?.copied ? 'msg err' : ''}`}>
+          <b>Backups</b>{' · '}
+          {last
+            ? <>last backup {dateTime(last.at)} ({hours! < 1 ? 'less than an hour' : `${Math.round(hours!)} hours`} ago), {(last.bytes / 1024 / 1024).toFixed(1)} MB, {last.counts.items?.toLocaleString()} items and {last.counts.patients?.toLocaleString()} patients.</>
+            : <>no backup has been made yet. Run <code>npm run backup</code>, then set up the nightly one (docs/backup.md).</>}
+          {hours !== null && hours > 36 && <> <b>It is more than a day and a half old: check that the nightly backup is running.</b></>}
+          {last && !last.copied && <> <b>There is no second copy off this computer{last.copyError ? ` (the last copy failed: ${last.copyError})` : ''}: a backup that lives only here is lost with the computer.</b></>}
+          {backup.lastFailure && (!last || backup.lastFailure.at > last.at) && <> <b>The last attempt failed: {backup.lastFailure.error}</b></>}
+        </div>
         <form method="post" action="/settings" class="grid panel">
           <label>VAT %<input name="vatPct" type="number" step="0.01" value={(s.vatRate * 100).toFixed(2)} /></label>
           <label>Default markup on cost %<input name="markupPct" type="number" step="0.01" value={(s.defaultMarkup * 100).toFixed(2)} /></label>
