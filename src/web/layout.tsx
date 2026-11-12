@@ -18,131 +18,317 @@ export const date = (d: Date | string | null | undefined) =>
 export const dateTime = (d: Date | string | null | undefined) =>
   d ? new Date(d).toLocaleString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : ''
 
-type NavItem = [key: string, label: string, href: string, perm: Permission]
+/** One screen in a module's drop-down menu or toolbar: F-key (or ''), label, address, permission needed. */
+type MenuItem = [key: string, label: string, href: string, perm: Permission]
+type Menu = { label: string; items: (MenuItem | '-')[] }
+type Tool = [icon: IconName, label: string, key: string, href: string, perm: Permission]
 
 /**
- * Three main tabs, each with the related screens as a submenu under it. A tab only shows the screens
- * the person's roles allow, and is hidden when none are. The F-keys below still go straight to a screen.
+ * sylken is split into modules the way Compharm is split into RxWin, POSWin and StockWin. Each module is
+ * its own window: a title bar, a menu bar with drop-down lists of every screen, a toolbar of the jobs done
+ * most often, and a key line at the bottom. A person only sees the modules, menus and screens their roles
+ * allow. The F-keys stay global and go straight to a screen from anywhere.
  */
-const navGroups: { slug: string; label: string; hue: string; icon: string; items: NavItem[] }[] = [
-  { slug: 'stock', label: 'Stock', hue: '#0f8a77', icon: '📦', items: [
-    ['F2', 'Items', '/items', 'items.view'],
-    ['F3', 'Receive', '/receiving', 'stock.receive'],
-    ['F4', 'Stock take', '/stocktakes', 'stock.adjust'],
-    ['F6', 'Order', '/reports/minmax', 'stock.reports'],
-  ] },
-  { slug: 'dispensary', label: 'Dispensary', hue: '#3b6fe0', icon: '💊', items: [
-    ['F5', 'Find patient', '/dispensary', 'rx.view'],
-    ['', 'New patient', '/dispensary/patients/new', 'rx.capture'],
-    ['', 'Owed items', '/dispensary/owed', 'rx.view'],
-    ['', 'Script book', '/dispensary/scripts', 'rx.view'],
-    ['', 'Register', '/dispensary/register', 'rx.view'],
-    ['', 'Medical aid claims', '/dispensary/claims', 'rx.claims'],
-    ['', 'Doctors', '/dispensary/doctors', 'rx.view'],
-    ['', 'Dispensers', '/dispensary/dispensers', 'users.manage'],
-  ] },
-  { slug: 'sales', label: 'Sales & admin', hue: '#d9650f', icon: '🧾', items: [
-    ['F9', 'Till', '/till/', 'till.use'],
-    ['F10', 'Cash-up', '/cashup', 'cashup.own'],
-    ['', 'Sales', '/sales', 'sales.view'],
-    ['', 'Accounts', '/accounts', 'accounts.view'],
-    ['F7', 'Reports', '/reports', 'stock.reports'],
-    ['F8', 'Settings', '/settings', 'settings.manage'],
-    ['', 'Users', '/users', 'users.manage'],
-  ] },
+export interface Module { slug: string; name: string; color: string; perm: Permission; owns: string[]; menus: Menu[]; tools: Tool[]; keys: [string, string][] }
+
+export const modules: Module[] = [
+  {
+    slug: 'rx', name: 'Dispensary', color: '#2f5fc4', perm: 'rx.view', owns: ['/dispensary', '/reports/rx'],
+    menus: [
+      { label: 'Dispensing', items: [
+        ['F5', 'Find patient / new script', '/dispensary', 'rx.view'],
+        ['', 'New patient', '/dispensary/patients/new', 'rx.capture'],
+        '-',
+        ['', 'Script book', '/dispensary/scripts', 'rx.view'],
+        ['', 'Owed items', '/dispensary/owed', 'rx.view'],
+        ['', 'Medical aid claims', '/dispensary/claims', 'rx.claims'],
+      ] },
+      { label: 'Reports', items: [
+        ['', 'Claims', '/dispensary/claims', 'rx.claims'],
+        ['', 'Script analysis', '/reports/rx/scripts', 'rx.reports'],
+        ['', 'Drug usage', '/reports/rx/drug-usage', 'rx.reports'],
+        ['', 'Repeat scripts not recently filled', '/reports/rx/repeats', 'rx.view'],
+        ['', 'Schedule 1 register', '/dispensary/register', 'rx.view'],
+        ['', 'Script book', '/dispensary/scripts', 'rx.view'],
+        ['', 'Patients', '/reports/rx/patients', 'rx.view'],
+        ['', 'Script price changes', '/reports/rx/price-changes', 'rx.reports'],
+        ['', 'Last patient visit', '/reports/rx/last-visit', 'rx.view'],
+        ['', 'Reversed scripts', '/reports/rx/reversed', 'rx.view'],
+        '-',
+        ['', 'All dispensary reports', '/reports/rx', 'rx.reports'],
+      ] },
+      { label: 'System', items: [
+        ['', 'Dispensary settings', '/dispensary/settings', 'rx.settings'],
+        ['', 'Your login and second PIN', '/me', 'self.manage'],
+      ] },
+      { label: 'Maintenance', items: [
+        ['', 'Doctors', '/dispensary/doctors', 'rx.view'],
+        ['', 'Dispensers', '/dispensary/dispensers', 'users.manage'],
+        ['', 'Logins and roles', '/users', 'users.manage'],
+      ] },
+    ],
+    tools: [
+      ['rx', 'New script', 'F5', '/dispensary', 'rx.view'],
+      ['person', 'New patient', '', '/dispensary/patients/new', 'rx.capture'],
+      ['book', 'Script book', '', '/dispensary/scripts', 'rx.view'],
+      ['box', 'Owed items', '', '/dispensary/owed', 'rx.view'],
+      ['repeat', 'Repeats', '', '/reports/rx/repeats', 'rx.view'],
+      ['claim', 'Claims', '', '/dispensary/claims', 'rx.claims'],
+      ['lock', 'Register', '', '/dispensary/register', 'rx.view'],
+      ['chart', 'Reports', '', '/reports/rx', 'rx.reports'],
+    ],
+    keys: [['F5', 'Find patient'], ['/', 'Search'], ['↑ ↓', 'Move'], ['Enter', 'Open'], ['Alt', 'Menus']],
+  },
+  {
+    slug: 'till', name: 'Till', color: '#0f7a5f', perm: 'till.use',
+    owns: ['/till', '/cashup', '/sales', '/accounts', '/reports/till', '/reports/sales', '/settings', '/users', '/me'],
+    menus: [
+      { label: 'Transactions', items: [
+        ['F9', 'Invoicing (open the till)', '/till/', 'till.use'],
+        ['F10', 'Cash-up', '/cashup', 'cashup.own'],
+        ['', 'Cash-up problems', '/cashup/problems', 'cashup.manage'],
+        '-',
+        ['', 'Sales journal', '/sales', 'sales.view'],
+        ['', 'Customer accounts', '/accounts', 'accounts.view'],
+        ['', 'Age analysis', '/accounts/aging', 'accounts.view'],
+      ] },
+      { label: 'Reports', items: [
+        ['', 'Daily reports', '/reports/sales', 'sales.view'],
+        ['', 'Cash-up procedure', '/cashup', 'cashup.own'],
+        ['', 'Statements - accounts', '/reports/till/statements', 'sales.view'],
+        ['', 'Invoice reprints', '/reports/till/journal', 'sales.view'],
+        ['', "Debtors' reports", '/reports/till/debtors', 'sales.view'],
+        ['', 'Cash debtor transactions', '/reports/till/account-transactions', 'sales.view'],
+        ['', 'Detail register reports', '/reports/till/detail', 'sales.view'],
+        ['', 'Assistants reports', '/reports/till/assistants', 'sales.view'],
+        ['', 'Journal report', '/reports/till/journal', 'sales.view'],
+        ['', 'Petty cash', '/reports/till/petty-cash', 'sales.view'],
+        ['', 'Invoice/script price alterations', '/reports/till/price-alterations', 'sales.view'],
+        ['', 'Markup report', '/reports/till/markup', 'sales.view'],
+        ['', 'OTC sales', '/reports/till/otc', 'sales.view'],
+        ['', 'Contacts', '/reports/till/contacts', 'sales.view'],
+        ['', 'Sales and GP by item', '/reports/sales-gp', 'sales.view'],
+        ['', 'Audit trail', '/reports/till/audit', 'audit.view'],
+      ] },
+      { label: 'Maintenance', items: [
+        ['F8', 'Shop settings and quick buttons', '/settings', 'settings.manage'],
+        ['', 'Logins and roles', '/users', 'users.manage'],
+      ] },
+      { label: 'System', items: [
+        ['', 'Your login and second PIN', '/me', 'self.manage'],
+      ] },
+    ],
+    tools: [
+      ['cash', 'Invoicing', 'F9', '/till/', 'till.use'],
+      ['drawer', 'Cash-up', 'F10', '/cashup', 'cashup.own'],
+      ['book', 'Sales journal', '', '/sales', 'sales.view'],
+      ['acct', 'Accounts', '', '/accounts', 'accounts.view'],
+      ['claim', 'Statements', '', '/reports/till/statements', 'sales.view'],
+      ['print', 'Reprints', '', '/reports/till/journal', 'sales.view'],
+      ['chart', 'Daily reports', '', '/reports/sales', 'sales.view'],
+      ['gear', 'Settings', 'F8', '/settings', 'settings.manage'],
+    ],
+    keys: [['F9', 'Open the till'], ['F10', 'Cash-up'], ['F8', 'Settings'], ['Alt', 'Menus']],
+  },
+  {
+    slug: 'stock', name: 'Stock', color: '#b5651d', perm: 'items.view', owns: ['/items', '/receiving', '/stocktakes', '/reports'],
+    menus: [
+      { label: 'Stock', items: [
+        ['F2', 'Items', '/items', 'items.view'],
+        ['', 'New item', '/items/new', 'items.edit'],
+        ['', 'Stock by bin', '/items/bins', 'items.view'],
+        ['', 'ABC list', '/items/abc', 'items.view'],
+        ['', 'Usage and velocity', '/items/velocity', 'items.view'],
+      ] },
+      { label: 'Transactions', items: [
+        ['F3', 'Receive a delivery', '/receiving', 'stock.receive'],
+        ['F4', 'Stock take', '/stocktakes', 'stock.adjust'],
+      ] },
+      { label: 'Ordering', items: [
+        ['F6', 'Order (min/max)', '/reports/minmax', 'stock.reports'],
+      ] },
+      { label: 'Reports', items: [
+        ['F7', 'All stock reports', '/reports', 'stock.reports'],
+        '-',
+        ['', 'Stock valuation', '/reports/valuation', 'stock.reports'],
+        ['', 'Negative stock', '/reports/negative', 'stock.reports'],
+        ['', 'Dormant stock', '/reports/dormant', 'stock.reports'],
+        ['', 'Stock adjustments', '/reports/adjustments', 'stock.reports'],
+        ['', 'Item GP', '/reports/gp', 'stock.reports'],
+        ['', 'Quarantined items', '/reports/quarantine', 'stock.reports'],
+      ] },
+      { label: 'Maintenance', items: [
+        ['F8', 'Shop settings', '/settings', 'settings.manage'],
+      ] },
+    ],
+    tools: [
+      ['find', 'Items', 'F2', '/items', 'items.view'],
+      ['truck', 'Receive', 'F3', '/receiving', 'stock.receive'],
+      ['count', 'Stock take', 'F4', '/stocktakes', 'stock.adjust'],
+      ['cart', 'Order', 'F6', '/reports/minmax', 'stock.reports'],
+      ['bin', 'Bins', '', '/items/bins', 'items.view'],
+      ['plus', 'New item', '', '/items/new', 'items.edit'],
+      ['chart', 'Reports', 'F7', '/reports', 'stock.reports'],
+    ],
+    keys: [['F2', 'Items'], ['F3', 'Receive'], ['F4', 'Stock take'], ['F6', 'Order'], ['/', 'Search'], ['Alt', 'Menus']],
+  },
 ]
-const nav: NavItem[] = navGroups.flatMap((g) => g.items)
 
-/** What each screen is, for the big buttons on the home page. */
-const tileInfo: Record<string, [icon: string, blurb: string]> = {
-  '/items': ['📦', 'Find items, prices, stock on hand, bins and the ABC list'],
-  '/receiving': ['🚚', 'Book in supplier deliveries and free stock'],
-  '/stocktakes': ['🧮', 'Count the shelves and put right the differences'],
-  '/reports/minmax': ['🛒', 'What to order: items at or below their minimum'],
-  '/dispensary': ['🔍', 'Find a patient and start a script'],
-  '/dispensary/patients/new': ['👤', 'Add a new patient or member'],
-  '/dispensary/owed': ['🧾', 'Items still owed to patients'],
-  '/dispensary/scripts': ['📖', 'Every script dispensed, to reprint or amend'],
-  '/dispensary/register': ['🔒', 'Scheduled medicines register'],
-  '/dispensary/doctors': ['🩺', 'Doctors and their practice numbers'],
-  '/dispensary/dispensers': ['🧑‍⚕️', 'The dispensers and their codes, and add a new dispenser'],
-  '/till/': ['💳', 'Ring up sales and take payment'],
-  '/cashup': ['💰', 'Count the drawer and close the till run'],
-  '/sales': ['📈', 'The sales journal'],
-  '/accounts': ['🏷️', 'Customer accounts and statements'],
-  '/reports': ['📊', 'Stock, sales and dispensing reports'],
-  '/settings': ['⚙️', 'Shop settings, prices and quick buttons'],
-  '/users': ['👥', 'Logins, roles and staff codes'],
+/** The modules this person may open, each with only the menus, menu lines and tools their roles allow. */
+export function modulesFor(user: SessionUser): Module[] {
+  const ok = (perm: Permission) => can(user.roles, perm)
+  return modules.filter((m) => ok(m.perm)).map((m) => ({
+    ...m,
+    menus: m.menus
+      .map((g) => ({ ...g, items: g.items.filter((i) => i === '-' || ok(i[3])) }))
+      .map((g) => ({ ...g, items: g.items.filter((i, n, all) => i !== '-' || (n > 0 && n < all.length - 1 && all[n - 1] !== '-')) }))
+      .filter((g) => g.items.some((i) => i !== '-')),
+    tools: m.tools.filter((t) => ok(t[4])),
+  }))
 }
 
-/** Each main tab with only the screens this person's roles allow; a tab with none is left out. */
-function groupsFor(user: SessionUser) {
-  return navGroups
-    .map((g) => ({ ...g, items: g.items.filter(([, , , perm]) => can(user.roles, perm)) }))
-    .filter((g) => g.items.length)
+/** The module a person lands on: the dispensary for dispensary staff, otherwise the till. */
+export const homeModule = (user: SessionUser) => modulesFor(user)[0]
+
+export const modulePath = (slug: string) => `/m/${slug}`
+
+/** The module a page belongs to: the one owning the longest prefix of the path; the home module otherwise. */
+function moduleOf(mods: Module[], path = ''): Module | undefined {
+  if (path.startsWith('/m/')) return mods.find((m) => m.slug === path.slice(3).replace(/\/$/, '')) ?? mods[0]
+  let best: Module | undefined, len = 0
+  for (const m of mods) for (const o of m.owns) if ((path === o || path.startsWith(o.endsWith('/') ? o : `${o}/`) || path === `${o}/`) && o.length > len) { best = m; len = o.length }
+  return best ?? mods[0]
 }
 
-/** The group a person may open by its address name (stock, dispensary, sales), or undefined. */
-export const groupFor = (user: SessionUser, slug: string) => groupsFor(user).find((g) => g.slug === slug)
+const icons = {
+  rx: '<path d="M9 3h6v4H9zM6 7h12v14H6z"/><path d="M12 11v6M9 14h6"/>',
+  find: '<circle cx="11" cy="11" r="6"/><path d="M20 20l-4.5-4.5"/>',
+  person: '<circle cx="12" cy="8" r="4"/><path d="M4 21c1-4 4.5-6 8-6s7 2 8 6"/>',
+  box: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+  repeat: '<path d="M17 2l3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="M7 22l-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/>',
+  claim: '<path d="M6 3h9l4 4v14H6z"/><path d="M9 12h7M9 16h7M14 3v5h5"/>',
+  book: '<path d="M4 4h7a3 3 0 0 1 3 3v14a2 2 0 0 0-2-2H4z"/><path d="M20 4h-4a2 2 0 0 0-2 2v13a2 2 0 0 1 2-2h4z"/>',
+  lock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+  chart: '<path d="M4 20V10M10 20V4M16 20v-7M22 20H2"/>',
+  cash: '<rect x="2" y="6" width="20" height="12" rx="2"/><circle cx="12" cy="12" r="3"/>',
+  drawer: '<rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 12h18M10 16h4"/>',
+  acct: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 10h18M7 15h4"/>',
+  print: '<path d="M6 9V3h12v6"/><rect x="3" y="9" width="18" height="8" rx="2"/><path d="M6 14h12v7H6z"/>',
+  gear: '<circle cx="12" cy="12" r="3"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M4.9 19.1L7 17M17 7l2.1-2.1"/>',
+  truck: '<path d="M2 6h12v10H2zM14 9h4l4 4v3h-8z"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="18" r="2"/>',
+  count: '<path d="M9 5h11M9 12h11M9 19h11"/><path d="M4 5l1 1 2-2M4 12l1 1 2-2M4 19l1 1 2-2"/>',
+  cart: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l3 12h11l2-8H6"/>',
+  bin: '<path d="M3 4h18v6H3zM3 14h18v6H3z"/><path d="M10 7h4M10 17h4"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
+  tag: '<path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  undo: '<path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/>',
+} as const
+export type IconName = keyof typeof icons
+export const Icon = ({ name }: { name: IconName }) => raw(`<svg viewBox="0 0 24 24" aria-hidden="true" class="ic">${icons[name]}</svg>`)
 
-/** The group's second page: its submenu tabs only. */
-export const menuPath = (slug: string) => `/menu/${slug}`
-
-/** The home page: three big coloured tabs and nothing else. Each opens that group's submenu page. */
-export function Launcher(props: { user: SessionUser }) {
+/** The menu bar: each heading opens its drop-down list. Alt + the underlined letter opens it from the keyboard. */
+export function MenuBar({ mod }: { mod: Module }) {
   return (
-    <div class="home-tabs">{groupsFor(props.user).map((g) => (
-      <a class="home-tab" href={menuPath(g.slug)} style={`--hue:${g.hue}`}>
-        <span class="ico" aria-hidden="true">{g.icon}</span>{g.label}
-      </a>
-    ))}</div>
+    <nav class="menubar" aria-label={`${mod.name} menus`}>
+      {mod.menus.map((g) => (
+        <div class="menu">
+          <button type="button" class="menu-h" data-alt={g.label[0].toLowerCase()} aria-haspopup="true" aria-expanded="false"><u>{g.label[0]}</u>{g.label.slice(1)}</button>
+          <div class="menu-list" role="menu">{g.items.map((i) => i === '-'
+            ? <hr />
+            : <a role="menuitem" href={i[2]}>{i[1]}{i[0] && <kbd>{i[0]}</kbd>}</a>)}</div>
+        </div>
+      ))}
+      <div class="menu">
+        <button type="button" class="menu-h" data-alt="x" aria-haspopup="true" aria-expanded="false">E<u>x</u>it</button>
+        <div class="menu-list" role="menu"><a role="menuitem" href="/logout">Log out</a></div>
+      </div>
+    </nav>
   )
 }
 
-/** A group's second page: its submenu as medium tabs, each opening a function page. Null if the group is unknown or not allowed. */
-export function GroupMenu(props: { user: SessionUser; slug: string }) {
-  const g = groupFor(props.user, props.slug)
-  if (!g) return null
+/** The toolbar: big buttons for the module's most used screens, and buttons to the other modules on the right. */
+export function Toolbar({ mod, mods, here }: { mod: Module; mods: Module[]; here?: string }) {
   return (
-    <div style={`--hue:${g.hue}`}>
-      <div class="row"><a class="btn secondary" href="/">← Home</a><h1 style="margin:0"><span class="ico" aria-hidden="true">{g.icon}</span> {g.label}</h1></div>
-      <nav class="med-tabs" aria-label={`${g.label} screens`}>{g.items.map(([k, label, href]) => (
-        <a class="med-tab" href={href} title={tileInfo[href]?.[1]}>
-          <span class="ico" aria-hidden="true">{tileInfo[href]?.[0]}</span>{label}{k && <kbd>{k}</kbd>}
-        </a>
+    <div class="toolstrip">
+      <nav class="tools" aria-label={`${mod.name} toolbar`}>{mod.tools.map(([icon, label, key, href], n) => (
+        <a href={href} class={`tool${n === 0 ? ' main' : ''}${href === here ? ' on' : ''}`}><Icon name={icon} /><span>{label}</span>{key && <kbd>{key}</kbd>}</a>
+      ))}</nav>
+      <nav class="switch" aria-label="Other modules">{mods.filter((m) => m !== mod).map((m) => (
+        <a href={modulePath(m.slug)} style={`--c:${m.color}`}><i />{m.name}</a>
       ))}</nav>
     </div>
   )
+}
+
+/** The toolbar or menu entry with the longest href that prefixes the path, so /reports/minmax lights up Order, not Reports. */
+function current(mod: Module | undefined, path = '') {
+  if (!mod) return undefined
+  return mod.tools.map((t) => t[3]).filter((h) => path === h || path.startsWith(h.endsWith('/') ? h : `${h}/`)).sort((a, b) => b.length - a.length)[0]
 }
 
 // An unattended screen logs itself out, so patient details are not left showing.
 const idleLock = `(()=>{let t;const reset=()=>{clearTimeout(t);t=setTimeout(()=>{location.href='/logout?idle=1'},${security.idleMinutes * 60_000})};
 ['mousemove','mousedown','keydown','touchstart','scroll'].forEach(e=>addEventListener(e,reset,{passive:true}));reset()})()`
 
+/** The module window frame, shared with the till page. */
+export const frameCss = `
+/* The module window: title bar, menu bar, toolbar at the top; key line at the bottom; the screen fills the rest. */
+body.framed{--mod:#2f5fc4;min-height:100vh;display:flex;flex-direction:column;font-family:'Segoe UI',Tahoma,system-ui,sans-serif}
+header.frame,div.frame{position:sticky;top:0;z-index:20;background:var(--panel);box-shadow:0 1px 0 var(--line)}
+.titlebar{display:flex;align-items:center;gap:12px;height:32px;padding:0 12px;background:linear-gradient(180deg,color-mix(in srgb,var(--mod) 80%,#fff) 0%,var(--mod) 55%,color-mix(in srgb,var(--mod) 85%,#000) 100%);color:#fff;font-size:13px;text-shadow:0 1px 0 rgba(0,0,0,.25)}
+.titlebar .brand{color:#fff;text-decoration:none;font-weight:700;font-size:15px;letter-spacing:.01em}
+.titlebar .shop{opacity:.85}.titlebar .who{color:#fff;opacity:.9;text-decoration:none}.titlebar .who:hover{text-decoration:underline}
+.titlebar .tb-btn{background:rgba(255,255,255,.16);color:#fff;border:1px solid rgba(255,255,255,.35);border-radius:3px;padding:3px 10px;font-size:12.5px;text-decoration:none;cursor:pointer}
+.titlebar .tb-btn:hover{background:rgba(255,255,255,.28)}
+.menubar{display:flex;align-items:center;gap:0;height:26px;padding:0 4px;border-bottom:1px solid #c9ced6;background:#f0f0f0;color:#1a1a1a}
+.menu{position:relative}
+.menu-h{background:none;color:#1a1a1a;border:1px solid transparent;border-radius:0;padding:2px 10px;font-size:14px;cursor:default}
+.menu-h:hover,.menu.open .menu-h{background:#cce4f7;border-color:#99c9ef;color:#1a1a1a;filter:none}
+.menu-h u{text-underline-offset:2px}
+.menu-list{display:none;position:absolute;left:0;top:100%;min-width:270px;max-height:calc(100vh - 90px);overflow:auto;background:#f2f2f2;border:1px solid #a0a0a0;border-radius:0;box-shadow:3px 3px 6px rgba(0,0,0,.25);padding:2px;z-index:30}
+.menu.open .menu-list{display:block}
+.menu-list a{display:flex;justify-content:space-between;gap:16px;padding:4px 18px 4px 28px;color:#1a1a1a;text-decoration:none;white-space:nowrap;font-size:14px;border:1px solid transparent}
+.menu-list a:hover,.menu-list a:focus{background:#cce4f7;border-color:#99c9ef;outline:0}.menu-list kbd{background:none;border:0;color:#555}
+.menu-list hr{border:0;border-top:1px solid #c9c9c9;border-bottom:1px solid #fff;margin:3px 2px 3px 26px}
+.toolstrip{display:flex;align-items:stretch;gap:6px;padding:4px 8px;background:linear-gradient(180deg,#fbfbfb,#e7e9ec);border-bottom:1px solid #b9bfc7;color:#1a1a1a}
+.tools{display:flex;gap:4px;flex-wrap:wrap}
+.tool{width:88px;min-height:62px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;border-radius:3px;border:1px solid transparent;color:#1a1a1a;text-decoration:none;font-size:12.5px;font-weight:600;text-align:center;line-height:1.15;padding:4px}
+.tool .ic{width:26px;height:26px;stroke:var(--mod);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.tool kbd{margin:0;font-size:10px;border:0;background:none;padding:0}
+.tool:hover{background:linear-gradient(180deg,#eaf4fd,#cfe6fa);border-color:#7eb4ea}
+.tool.on{background:linear-gradient(180deg,#dcecfc,#c1dcf7);border-color:#569de5;box-shadow:inset 0 1px 2px rgba(0,0,0,.15)}
+.tool.main{font-weight:700}
+.switch{margin-left:auto;display:flex;gap:6px;align-items:center;flex-wrap:wrap}
+.switch a{display:flex;align-items:center;gap:7px;padding:5px 12px;border:1px solid #adb3bb;border-radius:3px;background:linear-gradient(180deg,#fff,#e5e5e5);color:#1a1a1a;text-decoration:none;font-weight:600;font-size:13px}
+.switch a i{width:9px;height:9px;border-radius:2px;background:var(--c)}.switch a:hover{border-color:var(--c)}
+main{flex:1;width:100%;padding:16px 20px}h1{font-size:20px;margin:4px 0 12px}h2{font-size:16px;margin:20px 0 8px}
+.keyline{position:sticky;bottom:0;z-index:15;display:flex;align-items:center;gap:6px 20px;flex-wrap:wrap;padding:3px 12px;background:#f0f0f0;border-top:1px solid #b9bfc7;font-size:12.5px;color:#333}
+.keyline .dot{display:inline-block;width:8px;height:8px;border-radius:50%;background:var(--good);margin-right:5px}.keyline .off .dot{background:var(--bad)}
+body:has(.fbar) .keyline{display:none}
+/* A module's home page: four counts, then one list that fills the screen. */
+.mod-counts{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 14px}
+.mod-count{display:flex;justify-content:space-between;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--line);border-left:5px solid var(--k,var(--muted));border-radius:8px;padding:12px 16px;color:var(--ink);text-decoration:none}
+a.mod-count:hover{border-color:var(--mod);border-left-color:var(--k,var(--mod))}
+.mod-count span{font-weight:600;color:var(--muted)}.mod-count b{font-size:26px;font-variant-numeric:tabular-nums}
+.k-red{--k:var(--bad)}.k-amb{--k:var(--warn)}.k-grn{--k:var(--good)}
+.mod-list{background:var(--panel);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.mod-list h2{margin:0;padding:10px 14px;font-size:15px;display:flex;justify-content:space-between;align-items:baseline;border-bottom:1px solid var(--line)}
+.mod-list h2 a{font-size:13px;font-weight:600;color:var(--mod)}
+.mod-list table{border:0}.mod-list .empty{padding:24px 16px;color:var(--muted)}
+.pill{display:inline-block;font-size:12px;font-weight:700;padding:1px 9px;border-radius:99px;white-space:nowrap}
+.p-red{background:color-mix(in srgb,var(--bad) 15%,transparent);color:var(--bad)}.p-amb{background:color-mix(in srgb,var(--warn) 16%,transparent);color:var(--warn)}
+.p-grn{background:color-mix(in srgb,var(--good) 15%,transparent);color:var(--good)}.p-gry{background:var(--chip);color:var(--muted)}
+@media (max-width:900px){.mod-counts{grid-template-columns:repeat(2,minmax(0,1fr))}.switch{display:none}}
+@media (max-width:640px){.tool{width:76px;min-height:56px;font-size:11.5px}.titlebar .shop,.titlebar .who{display:none}.menubar{overflow-x:auto}}
+.keyline kbd{display:inline-block;margin-right:5px;border:1px solid #b9bfc7;background:#fff;padding:0 4px;border-radius:3px;color:#222;font:600 11px ui-monospace,monospace}
+body.framed{--accent:var(--mod)}
+`
+
 const css = `
 :root{--bg:#f6f7f9;--panel:#fff;--ink:#1d2330;--muted:#5d6676;--line:#dde1e7;--accent:#0d6b5e;--accent-ink:#fff;--warn:#a5530a;--bad:#b42318;--good:#18794e;--chip:#eef1f4}
 @media (prefers-color-scheme:dark){:root{--bg:#14171c;--panel:#1c2027;--ink:#e6e9ee;--muted:#9aa3b2;--line:#2e343e;--accent:#3fb6a2;--accent-ink:#0b1512;--warn:#e7a35b;--bad:#f07167;--good:#5fd39a;--chip:#262b34}}
 *{box-sizing:border-box}body{margin:0;font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink)}
-header{display:flex;gap:12px;align-items:center;padding:6px 16px;position:sticky;top:0;z-index:20;background:var(--panel);border-bottom:1px solid var(--line);flex-wrap:wrap}
-header .brand{font-weight:700;color:var(--accent);text-decoration:none;font-size:16px}
-header nav{display:flex;gap:2px;flex-wrap:wrap}header nav a{color:var(--ink);text-decoration:none;padding:5px 8px;border-radius:6px;white-space:nowrap}
-header nav a:hover{background:var(--chip)}header nav a.on{background:var(--accent);color:var(--accent-ink)}header nav a.on kbd{background:transparent;color:inherit;border-color:currentColor;opacity:.8}kbd{font:11px ui-monospace,monospace;background:var(--chip);border:1px solid var(--line);border-radius:4px;padding:0 4px;margin-right:4px;color:var(--muted)}
-header nav.main-tabs{gap:6px}header nav.main-tabs a{font-weight:700;padding:7px 18px;border:2px solid var(--hue);background:color-mix(in srgb,var(--hue) 14%,var(--panel))}
-header nav.main-tabs a:hover{background:color-mix(in srgb,var(--hue) 30%,var(--panel))}header nav.main-tabs a.on{background:var(--hue);color:#fff}
-.home-tabs{display:flex;gap:12px;margin:8px 0 14px}
-.home-tab{flex:1;display:flex;align-items:center;justify-content:center;gap:12px;text-decoration:none;font:inherit;font-size:28px;font-weight:800;padding:56px 12px;border-radius:14px;border:3px solid var(--hue);background:color-mix(in srgb,var(--hue) 14%,var(--panel));color:var(--ink);cursor:pointer;transition:transform .08s}
-.home-tab .ico{font-size:32px;line-height:1}.home-tab:hover{transform:translateY(-2px);background:color-mix(in srgb,var(--hue) 28%,var(--panel))}
-.home-tab.on{background:var(--hue);color:#fff;box-shadow:0 6px 16px color-mix(in srgb,var(--hue) 40%,transparent)}
-.med-tabs{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 16px;padding:12px;border-radius:12px;background:color-mix(in srgb,var(--hue) 9%,var(--panel));border:1px solid color-mix(in srgb,var(--hue) 35%,var(--line))}
-.med-tab{display:inline-flex;align-items:center;gap:8px;padding:12px 20px;font-size:17px;font-weight:700;border-radius:10px;border:2px solid var(--hue);background:var(--panel);color:var(--ink);text-decoration:none}
-.med-tab .ico{font-size:20px;line-height:1}.med-tab:hover{background:var(--hue);color:#fff}.med-tab:hover kbd{background:transparent;color:#fff;border-color:#fff}
-@media (max-width:640px){.home-tabs{flex-direction:column}.home-tab{padding:18px 12px}}
-.sub-tabs{display:flex;gap:6px;flex-wrap:wrap;padding:8px 16px;background:color-mix(in srgb,var(--hue) 10%,var(--bg));border-bottom:2px solid var(--hue)}
-.sub-tabs a{color:var(--ink);text-decoration:none;padding:7px 14px;border-radius:8px;white-space:nowrap;font-size:15px;font-weight:600;border:1px solid color-mix(in srgb,var(--hue) 45%,var(--line));background:var(--panel)}
-.sub-tabs a:hover{background:color-mix(in srgb,var(--hue) 22%,var(--panel))}.sub-tabs a.on{background:var(--hue);border-color:var(--hue);color:#fff}.sub-tabs a.on kbd{background:transparent;color:#fff;border-color:#fff}
-@media print{.sub-tabs{display:none}}
-header .who{margin-left:auto;color:var(--muted);font-size:13px;white-space:nowrap}header #touch-toggle{margin-left:auto}header #touch-toggle+.who{margin-left:4px}
-main{padding:16px;max-width:1200px;margin:0 auto}h1{font-size:20px;margin:4px 0 12px}h2{font-size:16px;margin:20px 0 8px}
+${frameCss}
 .panel{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:12px 16px;margin-bottom:12px}
 table{width:100%;border-collapse:collapse;background:var(--panel)}th,td{padding:6px 8px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}
 th{font-weight:600;color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.02em}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
@@ -198,7 +384,7 @@ tr.cur{outline:2px solid var(--accent);outline-offset:-2px;background:color-mix(
 .print-only{display:none}.bin-group h2{margin-top:18px}
 details.bin-group{margin:6px 0;border:1px solid var(--line);border-radius:8px;background:var(--panel)}details.bin-group>summary{cursor:pointer;padding:10px 14px;font-size:16px;display:flex;gap:12px;align-items:baseline;list-style:none}details.bin-group>summary::-webkit-details-marker{display:none}details.bin-group>summary::before{content:'▸';width:12px;color:var(--muted)}details.bin-group[open]>summary::before{content:'▾'}details.bin-group>summary .bin-name{font-weight:600;min-width:120px}details.bin-group>summary:hover{background:var(--bg)}details.bin-group>.wrap,details.bin-group>table{margin:0 8px 10px}
 .move-bar{position:sticky;top:0;z-index:5;gap:10px;align-items:center;flex-wrap:wrap}
-@media print{header,.noprint,.toolbar,.msg{display:none!important}.print-only{display:block}th.print-only,td.print-only{display:table-cell}
+@media print{header,.keyline,.noprint,.toolbar,.msg{display:none!important}.print-only{display:block}th.print-only,td.print-only{display:table-cell}
   body{background:#fff;color:#000;font-size:12px}main{max-width:none;padding:0}table{background:#fff}th,td{padding:3px 6px;border-bottom:1px solid #999}
   td.counted,th.counted{width:90px;border-left:1px solid #999}.bin-group{break-inside:auto;border:0}details.bin-group>summary{padding:8px 0 4px;font-size:14px}details.bin-group>summary::before{content:none!important}.bin-group h2{break-after:avoid;font-size:14px}tr{break-inside:avoid}a{color:#000;text-decoration:none}.wrap{overflow:visible}}
 @media (max-width:980px){.rx-desk{grid-template-columns:1fr}}
@@ -215,7 +401,7 @@ body.touch-mode .touch-only{display:block}
 body.touch-mode input,body.touch-mode select{min-height:46px;font-size:17px}
 body.touch-mode button,body.touch-mode .btn{min-height:46px;padding:10px 18px}
 body.touch-mode th,body.touch-mode td{padding:12px 10px}
-body.touch-mode header{font-size:15px}body.touch-mode header nav a{padding:9px 8px}
+body.touch-mode .tool{width:108px;min-height:78px;font-size:14px}body.touch-mode .menu-list a{padding:11px 18px;font-size:16px}
 .tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(130px,1fr));gap:8px;margin:8px 0}
 .tile{min-height:60px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-weight:600;text-align:center;line-height:1.2;color:#fff;border-radius:8px;padding:6px}
 .tile small{font-weight:400;font-size:12px;opacity:.9}
@@ -228,7 +414,7 @@ body.touch-mode header{font-size:15px}body.touch-mode header nav a{padding:9px 8
 .bigacts button,.bigacts a.btn{min-height:60px;font-size:17px;font-weight:600;text-align:center;display:flex;align-items:center;justify-content:center}
 .touchgrid{display:grid;grid-template-columns:1.6fr 1fr;gap:16px;align-items:start}
 @media (max-width:900px){.touchgrid{grid-template-columns:1fr}}
-@media (max-width:640px){main{padding:12px 16px}header{gap:8px}header .who{margin-left:0}}
+@media (max-width:640px){main{padding:12px 16px}}
 `
 
 // Touch screen layout, remembered per browser. Screens add .touch-only panels for it.
@@ -239,6 +425,34 @@ const touch = `
   const set = (v) => { on = v; document.body.classList.toggle('touch-mode', v); if (b) b.textContent = v ? 'Keyboard layout' : 'Touch screen'; try { localStorage.setItem(k, v ? '1' : '0') } catch {} }
   set(on)
   if (b) b.onclick = () => set(!on)
+})()`
+
+// Drop-down menus, as in a Windows program: click a heading (or Alt + its underlined letter) to open it,
+// move along the bar with the mouse or ← →, through a list with ↑ ↓, Enter opens, Esc closes.
+export const menus = `
+(()=>{
+  const bar=document.querySelector('.menubar');if(!bar)return;
+  const all=[...bar.querySelectorAll('.menu')];let open=null;
+  const close=()=>{if(open){open.classList.remove('open');open.querySelector('.menu-h').setAttribute('aria-expanded','false');open=null}};
+  const show=(m,focus)=>{if(open!==m)close();open=m;m.classList.add('open');m.querySelector('.menu-h').setAttribute('aria-expanded','true');
+    if(focus){const a=m.querySelector('.menu-list a');if(a)a.focus()}};
+  all.forEach(m=>{const h=m.querySelector('.menu-h');
+    h.addEventListener('click',e=>{e.stopPropagation();open===m?close():show(m)});
+    h.addEventListener('mouseenter',()=>{if(open&&open!==m)show(m)})});
+  document.addEventListener('click',e=>{if(open&&!open.contains(e.target))close()});
+  document.addEventListener('keydown',e=>{
+    if(e.altKey&&!e.ctrlKey&&e.key.length===1){const m=all.find(x=>x.querySelector('.menu-h').dataset.alt===e.key.toLowerCase());
+      if(m){e.preventDefault();e.stopImmediatePropagation();show(m,true)}return}
+    if(!open)return;
+    const items=[...open.querySelectorAll('.menu-list a')],i=items.indexOf(document.activeElement);
+    if(e.key==='Escape'){e.preventDefault();const h=open.querySelector('.menu-h');close();h.focus()}
+    else if(e.key==='ArrowDown'){e.preventDefault();e.stopImmediatePropagation();(items[i+1]||items[0]).focus()}
+    else if(e.key==='ArrowUp'){e.preventDefault();e.stopImmediatePropagation();(items[i-1]||items[items.length-1]).focus()}
+    else if(e.key==='ArrowRight'||e.key==='ArrowLeft'){e.preventDefault();const n=all.indexOf(open)+(e.key==='ArrowRight'?1:-1);show(all[(n+all.length)%all.length],true)}
+  },true);
+  const net=document.getElementById('netline');
+  const upd=()=>{if(!net)return;net.classList.toggle('off',!navigator.onLine);net.lastChild.textContent=navigator.onLine?'Online':'Offline'};
+  addEventListener('online',upd);addEventListener('offline',upd);upd();
 })()`
 
 // Function keys work everywhere, like Compharm. "/" jumps to the search box, arrows move through result rows.
@@ -261,56 +475,43 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('click',e=>{const r=e.target.closest('tr[data-href]');if(r&&!e.target.closest('a,button,input'))location.href=r.dataset.href});
 `
 
-/** The nav entry with the longest href that prefixes the path, so /reports/minmax lights up Order, not Reports. */
-function current(path = '') {
-  return nav.map(([, , href]) => href).filter((h) => path.startsWith(h)).sort((a, b) => b.length - a.length)[0]
-}
-
 export function Layout(props: { title: string; user?: SessionUser | null; path?: string; children?: Child; flash?: { ok?: string; err?: string } }) {
-  // Each main tab with only the screens this person may open, and the tab the current page belongs to.
-  const visible = props.user
-    ? navGroups.map((g) => ({ ...g, items: g.items.filter(([, , , perm]) => can(props.user!.roles, perm)) })).filter((g) => g.items.length)
-    : []
-  const here = current(props.path)
-  // On a group's own submenu page that group is the active tab; the submenu bar is only for the function pages.
-  const menuSlug = props.path?.startsWith('/menu/') ? props.path.slice('/menu/'.length).replace(/\/$/, '') : null
-  const active = menuSlug ? visible.find((g) => g.slug === menuSlug) : visible.find((g) => g.items.some(([, , href]) => href === here))
+  const mods = props.user ? modulesFor(props.user) : []
+  const mod = moduleOf(mods, props.path)
+  const here = current(mod, props.path)
   return (
     <html lang="en">
       <head>
         <meta charset="utf-8" />
         <meta name="viewport" content="width=device-width, initial-scale=1" />
-        <title>{props.title} · sylken</title>
+        <title>{props.title} · sylken{mod ? ` ${mod.name}` : ''}</title>
         <style>{raw(css)}</style>
       </head>
-      <body>
-        {props.user && (
-          <header>
-            <a class="brand" href="/">sylken</a>
-            {props.path !== '/' && (
-              <nav class="main-tabs">
-                {visible.map((g) => (
-                  <a href={menuPath(g.slug)} class={g === active ? 'on' : ''} style={`--hue:${g.hue}`}>{g.icon} {g.label}</a>
-                ))}
-              </nav>
-            )}
-            <button type="button" id="touch-toggle" class="secondary" style="padding:4px 10px;font-size:13px" title="Bigger buttons for a touch screen">Touch screen</button>
-            <span class="who" title={`${props.user.tenantName} · ${props.user.roles.map((r) => roleLabels[r]).join(', ')}`}><a href="/me">{props.user.name}</a> · <a href="/logout">Log out</a></span>
+      <body class={mod ? 'framed' : ''} style={mod ? `--mod:${mod.color}` : ''}>
+        {props.user && mod && (
+          <header class="frame">
+            <div class="titlebar">
+              <a class="brand" href={modulePath(mod.slug)}>sylken {mod.name}</a>
+              <span class="shop">{props.user.tenantName}</span>
+              <span class="spacer" />
+              <button type="button" id="touch-toggle" class="tb-btn" title="Bigger buttons for a touch screen">Touch screen</button>
+              <a class="who" href="/me" title={props.user.roles.map((r) => roleLabels[r]).join(', ')}>{props.user.name} · {props.user.roles.map((r) => roleLabels[r]).join(', ')}</a>
+              <a class="tb-btn" href="/logout">Log out</a>
+            </div>
+            <MenuBar mod={mod} />
+            <Toolbar mod={mod} mods={mods} here={here} />
           </header>
-        )}
-        {props.user && active && !menuSlug && (
-          <nav class="sub-tabs" style={`--hue:${active.hue}`}>
-            {active.items.map(([k, label, href]) => (
-              <a href={href} class={href === here ? 'on' : ''}>{k && <kbd>{k}</kbd>}{label}</a>
-            ))}
-          </nav>
         )}
         <main>
           {props.flash?.err && <div class="msg err">{props.flash.err}</div>}
           {props.flash?.ok && <div class="msg ok">{props.flash.ok}</div>}
           {props.children}
         </main>
+        {props.user && mod && (
+          <footer class="keyline">{mod.keys.map(([k, l]) => <span><kbd>{k}</kbd>{l}</span>)}<span class="spacer" /><span id="netline"><i class="dot" />Online</span></footer>
+        )}
         <script>{raw(keys)}</script>
+        <script>{raw(menus)}</script>
         <script>{raw(touch)}</script>
         {props.user && <script>{raw(idleLock)}</script>}
       </body>

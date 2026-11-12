@@ -29,7 +29,7 @@ describe('web', () => {
 
   it('serves every screen once logged in', async () => {
     const { get } = await loggedIn()
-    for (const p of ['/', '/menu/stock', '/menu/dispensary', '/menu/sales', '/items', '/items/new', '/receiving', '/stocktakes', '/reports', '/reports/minmax', '/reports/minmax/suggest', '/items/velocity',
+    for (const p of ['/', '/m/rx', '/m/till', '/m/stock', '/items', '/items/new', '/receiving', '/stocktakes', '/reports', '/reports/minmax', '/reports/minmax/suggest', '/items/velocity',
       '/reports/valuation', '/reports/negative', '/reports/dormant', '/reports/adjustments', '/reports/gp', '/reports/quarantine', '/settings',
       '/till/', '/till/app.js', '/till/sw.js', '/cashup', '/cashup/problems', '/sales', '/accounts', '/accounts/aging', '/reports/sales', '/reports/sales-gp',
       '/reports/sales?format=csv', '/reports/sales-gp?format=csv', '/dispensary', '/dispensary?q=smith', '/dispensary/patients/new',
@@ -42,8 +42,9 @@ describe('web', () => {
 
   it('adds a dispenser with a staff code from the Dispensary menu', async () => {
     const { t, get, post } = await loggedIn()
-    const menu = await (await get('/menu/dispensary')).text()
-    expect(menu).toContain('href="/dispensary/dispensers"')                                 // the Dispensers tab is in the Dispensary menu
+    const menu = await (await get('/m/rx')).text()
+    expect(menu).toContain('href="/dispensary/dispensers"')                                 // Dispensers is in the Dispensary module's Maintenance menu
+    expect((await get('/menu/dispensary')).headers.get('location')).toBe('/m/rx')          // the old group menu address still leads there
     const res = await post('/dispensary/dispensers', { name: 'Pula Dube', staffCode: 'pd', email: 'pula.dube@example.test', password: 'fake-pass-123' })
     expect(new URL(res.headers.get('location')!, 'http://x').searchParams.get('ok')).toBe('Dispenser added')
     const page = await (await get('/dispensary/dispensers')).text()

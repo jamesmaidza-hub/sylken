@@ -12,7 +12,8 @@ import { SESSION_COOKIE, loginRoutes } from './login.js'
 import { meRoutes, userRoutes } from './users.js'
 import { api } from './api.js'
 import { itemRoutes } from './items.js'
-import { GroupMenu, groupFor, Launcher, Layout } from './layout.js'
+import { Layout, modulePath } from './layout.js'
+import { modulePage } from './home.js'
 import { receivingRoutes } from './receiving.js'
 import { reportRoutes } from './reports.js'
 import { settingsRoutes } from './settings.js'
@@ -127,20 +128,13 @@ export function createApp(db: Sql) {
     return c.text('Something went wrong. The error has been logged.', 500)
   })
 
-  app.get('/', (c) => {
-    // The launcher: three big tabs and nothing else. Each opens its own page of submenu tabs (/menu/:group).
-    return page(c, 'Home', (
-      <>
-        <h1>{c.get('user').tenantName}</h1>
-        <Launcher user={c.get('user')} />
-      </>
-    ))
-  })
-
-  // A group's second page: only its submenu tabs, each opening a function page.
+  // Home is the person's own module: the dispensary for dispensary staff, otherwise the till module.
+  app.get('/', (c) => modulePage(c))
+  app.get('/m/:module', (c) => modulePage(c, c.req.param('module')))
+  // Old addresses of the three group menus, kept so bookmarks still work.
   app.get('/menu/:group', (c) => {
-    const group = groupFor(c.get('user'), c.req.param('group'))
-    return group ? page(c, group.label, <GroupMenu user={c.get('user')} slug={group.slug} />) : c.notFound()
+    const slug = ({ stock: 'stock', dispensary: 'rx', sales: 'till' } as Record<string, string>)[c.req.param('group')]
+    return slug ? c.redirect(modulePath(slug)) : c.notFound()
   })
 
   app.route('/items', itemRoutes())
