@@ -635,62 +635,116 @@ export function dispensaryRoutes() {
     const title = draft ? (s.repeatOf ? `Repeat of script ${s.repeatOf.scriptNo}` : 'New script') : `Script ${s.scriptNo}`
     return page(c, title, (
       <>
-        <RxToolbar patientId={s.patient.id} />
-        <div class="row">
-          <h1>{title} {statusChip(s.status)}</h1><span class="spacer" />
-          {s.status === 'dispensed' && <a class="btn" href={`/dispensary/scripts/${s.id}/labels`} target="_blank">Print labels</a>}
-          {s.status === 'dispensed' && !s.repeatOf && s.lines.some((l) => (l.repeatsLeft ?? 0) > 0) &&
-            <form method="post" action={`/dispensary/scripts/${s.id}/repeat`}><button class="secondary">Give a repeat</button></form>}
-          {s.repeatOf && <a class="btn secondary" href={`/dispensary/scripts/${s.repeatOf.id}`}>Original script {s.repeatOf.scriptNo}</a>}
-        </div>
-        <div class="rx-desk">
-          <div class="panel rx-form">
-            <div class="rx-row"><span class="rx-l">Patient</span>
-              <b class="rx-big"><a href={`/dispensary/patients/${s.patient.id}`}>{s.patient.name}</a></b>
-              {draft && !s.repeatOf && <a class="btn secondary" href="/dispensary" title="Park this script and find another patient">🔍 Other patient</a>}</div>
-            {draft && !s.repeatOf
-              ? <form method="post" action={`/dispensary/scripts/${s.id}`} id="rx-head">
-                  <div class="rx-row"><label class="rx-l" for="rx-doctor">Doctor</label>
-                    <select id="rx-doctor" name="doctorId" class="grow"><option value="">None on the script</option>{data.doctors.map((d) => <option value={d.id} selected={d.id === s.doctorId}>{d.name}{d.practiceNo ? ` (${d.practiceNo})` : ''}</option>)}</select>
-                    <a class="btn secondary" href="/dispensary/doctors" title="Add or find a doctor">🩺 Doctors</a></div>
-                  <div class="rx-row"><label class="rx-l" for="rx-date">Script date</label>
-                    <input id="rx-date" name="rxDate" type="date" value={s.rxDate} required />
-                    {s.patient.medicalAidName && <label class="chk"><input type="checkbox" name="private" checked={!s.billMedicalAid} /> Patient pays, don't bill {s.patient.medicalAidName}</label>}
-                    <button class="secondary">Save</button></div>
-                </form>
-              : <>
-                  <div class="rx-row"><span class="rx-l">Doctor</span>{s.doctorName ? <span><b>{s.doctorName}</b>{s.doctorPracticeNo && <span class="muted"> ({s.doctorPracticeNo})</span>}</span> : <span class="muted">None on the script</span>}</div>
-                  {s.repeatOf && <div class="rx-row"><span class="rx-l">Repeat</span><span>Repeat {s.repeatNo} of script {s.repeatOf.scriptNo}. Set what to give now in the lines below.</span></div>}
-                </>}
-            {s.initiatedCode && <div class="rx-row"><span class="rx-l">Started by</span><span><b>{s.initiatedCode}</b></span></div>}
-            {draft && !s.repeatOf && <form method="post" action={`/dispensary/scripts/${s.id}/lines`} id="add-line">
-              <div class="rx-row"><label class="rx-l" for="rx-item">Item</label>
-                <input id="rx-item" name="item" list="items-dl" data-items required autofocus autocomplete="off" placeholder="Scan, or type a code or name" class="grow" />
-                <button type="button" class="secondary" id="find-item" title="F5">🔍 Find item</button></div>
-              <datalist id="items-dl" />
-              <div class="rx-info" id="item-info" />
-              <div class="rx-row"><label class="rx-l" for="rx-qty">Quantity</label>
-                <input id="rx-qty" name="qty" type="number" min="1" step="1" required class="num" />
-                <select name="per"><option value="units">units</option><option value="packs">packs</option></select>
-                <label for="rx-supply">Give now</label><input id="rx-supply" name="supply" type="number" min="0" step="1" placeholder="all" class="num" /></div>
-              <div class="rx-row"><label class="rx-l" for="rx-dir">Directions</label>
-                <input id="rx-dir" name="directions" list="dir-dl" required autocomplete="off" placeholder="e.g. 1T3D" style="width:150px" />
-                <label for="rx-days">Days</label><input id="rx-days" name="supplyDays" type="number" min="1" value={settings.defaultSupplyDays} class="num" />
-                <label for="rx-rep">Repeats</label><input id="rx-rep" name="repeats" type="number" min="0" max="12" value="0" class="num" /></div>
-              <datalist id="dir-dl">{data.directions.map((d) => <option value={d.code}>{d.text}</option>)}</datalist>
-              <div class="rx-row"><span class="rx-l">Label reads</span><div class="rx-instr" id="dir-text"><span class="muted">Type a code like 1T3D, or write the directions out</span></div></div>
-              <div class="rx-row"><label class="rx-l" for="rx-icd">ICD-10</label><input id="rx-icd" name="icd10" placeholder="e.g. J06.9" style="width:150px" />
-                <label class="chk"><input type="checkbox" name="noClaim" /> Patient pays this line</label></div>
-              <div class="rx-row"><span class="rx-l" />
-                <button>Add line</button>
-                <a class="btn secondary" href="/dispensary" title="Ctrl+U">Park</a>
-                {canDispense && s.lines.length > 0 && <button type="button" class="secondary" id="rx-go">Go to dispense</button>}</div>
-            </form>}
-            {draft && !s.repeatOf && <ItemFinder />}
-            {!draft && <p class="muted" style="margin:0">Dispensed {dateTime(s.dispensedAt)} by {s.dispensedBy ?? 'unknown'}. Captured by {s.createdBy ?? 'unknown'}.
-              {s.status === 'reversed' && <b class="neg"> Reversed {dateTime(s.reversedAt)} by {s.reversedBy}: {s.reverseReason}</b>}</p>}
+        <div class="rxw">
+          <div class="rxw-main">
+            <div class="panel rxw-head">
+              <div class="rxw-title"><h1>{title} {statusChip(s.status)}</h1><span class="spacer" />
+                <a class="btn secondary" href={`/dispensary/patients/${s.patient.id}#scripts`} title="F9">History <kbd>F9</kbd></a>
+                {s.status === 'dispensed' && <a class="btn" href={`/dispensary/scripts/${s.id}/labels`} target="_blank">Print labels</a>}
+                {s.status === 'dispensed' && !s.repeatOf && s.lines.some((l) => (l.repeatsLeft ?? 0) > 0) &&
+                  <form method="post" action={`/dispensary/scripts/${s.id}/repeat`}><button class="secondary">Give a repeat</button></form>}
+                {s.repeatOf && <a class="btn secondary" href={`/dispensary/scripts/${s.repeatOf.id}`}>Original script {s.repeatOf.scriptNo}</a>}
+              </div>
+              <div class="rxw-fields">
+                <div class="rxw-f"><span>Patient</span>
+                  <div class="row"><b class="rx-big"><a href={`/dispensary/patients/${s.patient.id}`}>{s.patient.name}</a></b>
+                    {draft && !s.repeatOf && <a class="btn secondary small" href="/dispensary" title="Park this script and find another patient">Other patient</a>}</div></div>
+                {draft && !s.repeatOf
+                  ? <form method="post" action={`/dispensary/scripts/${s.id}`} id="rx-head" class="rxw-headform">
+                      <label class="rxw-f" for="rx-doctor"><span>Doctor <a href="/dispensary/doctors" title="Add or find a doctor">add</a></span>
+                        <select id="rx-doctor" name="doctorId"><option value="">None on the script</option>{data.doctors.map((d) => <option value={d.id} selected={d.id === s.doctorId}>{d.name}{d.practiceNo ? ` (${d.practiceNo})` : ''}</option>)}</select></label>
+                      <label class="rxw-f" for="rx-date"><span>Script date</span><input id="rx-date" name="rxDate" type="date" value={s.rxDate} required /></label>
+                      <div class="rxw-f"><span>&nbsp;</span><div class="row">
+                        {s.patient.medicalAidName && <label class="chk"><input type="checkbox" name="private" checked={!s.billMedicalAid} /> Patient pays, don't bill {s.patient.medicalAidName}</label>}
+                        <button class="secondary">Save</button></div></div>
+                    </form>
+                  : <>
+                      <div class="rxw-f"><span>Doctor</span>{s.doctorName ? <b>{s.doctorName}{s.doctorPracticeNo && <span class="muted"> ({s.doctorPracticeNo})</span>}</b> : <span class="muted">None on the script</span>}</div>
+                      <div class="rxw-f"><span>Script date</span><b>{date(s.rxDate)}</b></div>
+                      {s.repeatOf && <div class="rxw-f"><span>Repeat</span>Repeat {s.repeatNo} of script {s.repeatOf.scriptNo}. Set what to give now in the lines below.</div>}
+                    </>}
+                <div class="rxw-f"><span>Script no.</span><b>{s.scriptNo ?? <span class="muted">given when dispensed</span>}</b></div>
+                {s.initiatedCode && <div class="rxw-f"><span>Dispenser</span><b>{s.initiatedCode}</b></div>}
+              </div>
+              {!draft && <p class="muted" style="margin:8px 0 0">Dispensed {dateTime(s.dispensedAt)} by {s.dispensedBy ?? 'unknown'}. Captured by {s.createdBy ?? 'unknown'}.
+                {s.status === 'reversed' && <b class="neg"> Reversed {dateTime(s.reversedAt)} by {s.reversedBy}: {s.reverseReason}</b>}</p>}
+            </div>
+            <div class="panel rxw-lines"><div class="wrap"><table>
+              <thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Given</th><th>Directions</th><th class="n">Days</th><th class="n">Repeats</th><th>ICD-10</th><th class="n">Item</th><th class="n">Fee</th><th class="n">Total</th>{draft && <th />}</tr></thead>
+              <tbody>{s.lines.length === 0 && <tr><td colspan={12} class="muted">No lines yet. Scan or type the first item below.</td></tr>}{s.lines.map((l) => (
+                <tr>
+                  <td>{l.lineNo}</td>
+                  <td><a href={`/items/${l.itemId}`}>{l.description}</a> <span class="muted">{l.stockCode}</span>
+                    {l.schedule !== null && <span class="chip">S{l.schedule}</span>}{l.nappiCode && <span class="chip">NAPPI {l.nappiCode}</span>}{l.noClaim && <span class="chip">no claim</span>}
+                    {draft && <div class="hint">{l.onHandUnits} units on hand{l.packSize > 1 ? `, pack of ${l.packSize}` : ''}</div>}</td>
+                  <td class="n">{l.qtyUnits}</td>
+                  <td class="n">{draft && s.repeatOf
+                    ? <form method="post" action={`/dispensary/scripts/${s.id}/lines/${l.id}/supply`} class="row" style="justify-content:flex-end">
+                        <input name="supply" type="number" min="0" max={l.qtyUnits} value={l.supplyUnits} style="width:70px" /><button class="secondary">Set</button></form>
+                    : l.supplyUnits}
+                    {l.owedUnits > 0 && <div class="neg">{l.owedUnits} owed</div>}</td>
+                  <td>{l.directions}</td><td class="n">{l.supplyDays}</td>
+                  <td class="n">{s.repeatOf ? '' : l.repeats ? `${l.repeatsLeft ?? l.repeats} of ${l.repeats} left` : ''}</td>
+                  <td>{l.icd10.join(', ')}</td>
+                  <td class="n">{money(l.itemTotal)}</td><td class="n">{money(l.fee)}</td><td class="n">{money(l.lineTotal)}</td>
+                  {draft && <td>{!s.repeatOf && <form method="post" action={`/dispensary/scripts/${s.id}/lines/${l.id}/delete`}><button class="secondary" title="Remove line">✕</button></form>}</td>}
+                </tr>
+              ))}</tbody>
+            </table></div></div>
+            {draft && !s.repeatOf && <div class="panel rxw-entry">
+              <form method="post" action={`/dispensary/scripts/${s.id}/lines`} id="add-line" class="rxw-form">
+                <div class="rxw-row">
+                  <label class="rxw-f grow" for="rx-item"><span>Item <kbd>F5</kbd> find</span>
+                    <div class="row"><input id="rx-item" name="item" list="items-dl" data-items required autofocus autocomplete="off" placeholder="Scan, or type a code or name" class="grow" />
+                      <button type="button" class="secondary" id="find-item" title="F5">Find item</button></div></label>
+                  <label class="rxw-f" for="rx-qty"><span>Quantity</span>
+                    <div class="row"><input id="rx-qty" name="qty" type="number" min="1" step="1" required class="num" />
+                      <select name="per" aria-label="Units or packs"><option value="units">units</option><option value="packs">packs</option></select></div></label>
+                  <label class="rxw-f" for="rx-supply"><span>Give now <kbd>F4</kbd> owe</span><input id="rx-supply" name="supply" type="number" min="0" step="1" placeholder="all" class="num" /></label>
+                </div>
+                <datalist id="items-dl" />
+                <div class="rx-info" id="item-info" />
+                <div class="rxw-row">
+                  <label class="rxw-f" for="rx-dir"><span>Directions</span><input id="rx-dir" name="directions" list="dir-dl" required autocomplete="off" placeholder="e.g. 1T3D" style="width:130px" /></label>
+                  <div class="rxw-f grow"><span>Label reads</span><div class="rx-instr" id="dir-text"><span class="muted">Type a code like 1T3D, or write the directions out</span></div></div>
+                  <label class="rxw-f" for="rx-days"><span>Days</span><input id="rx-days" name="supplyDays" type="number" min="1" value={settings.defaultSupplyDays} class="num" /></label>
+                  <label class="rxw-f" for="rx-rep"><span>Repeats <kbd>F8</kbd></span><input id="rx-rep" name="repeats" type="number" min="0" max="12" value="0" class="num" /></label>
+                  <label class="rxw-f" for="rx-icd"><span>ICD-10</span><input id="rx-icd" name="icd10" placeholder="e.g. J06.9" style="width:110px" /></label>
+                </div>
+                <datalist id="dir-dl">{data.directions.map((d) => <option value={d.code}>{d.text}</option>)}</datalist>
+                <div class="rxw-row rxw-acts">
+                  <label class="chk"><input type="checkbox" name="noClaim" /> Patient pays this line <kbd>F3</kbd></label>
+                  <span class="spacer" />
+                  <a class="btn secondary" href="/dispensary" title="Ctrl+U">Park <kbd>Ctrl U</kbd></a>
+                  {canDispense && s.lines.length > 0 && <button type="button" class="secondary" id="rx-go">Go to dispense</button>}
+                  <button>Add line <kbd>Enter</kbd></button>
+                </div>
+              </form>
+              <ItemFinder />
+            </div>}
+            {draft && !s.repeatOf && <>
+          <p class="hint" style="margin:-4px 0 10px">Price = the item at the shop's price for the units prescribed{settings.dispensingFee ? `, plus a dispensing fee of ${money(settings.dispensingFee)} a line` : ''}. Medical aid pricing rules come with claims.</p>
+        </>}
+        {draft && <div class="panel rxw-disp">
+          <h2>Check and dispense</h2>
+          {warnings.length > 0 && <div class="panel">{warnings.map((w) => (
+            <div class={w.level === 'block' ? 'neg' : w.level === 'info' ? 'muted' : ''} style="margin:2px 0">
+              {w.level === 'block' ? '⛔ ' : w.level === 'info' ? 'ℹ ' : '⚠ '}{w.lineNo ? `Line ${w.lineNo}: ` : ''}{w.text}</div>
+          ))}</div>}
+          {canDispense && (needsConfirm || needsStock) && !canOverride
+            ? <p class="muted">A pharmacist must dispense this script, because of the warnings above.</p>
+            : canDispense
+            ? <form method="post" action={`/dispensary/scripts/${s.id}/dispense`} class="panel row">
+                {needsConfirm && <label class="row" style="flex-direction:row"><input type="checkbox" name="confirmed" required /> I have checked the allergies and alerts above</label>}
+                {needsStock && <label class="row" style="flex-direction:row"><input type="checkbox" name="allowNegative" /> Stock count is wrong: dispense anyway</label>}
+                <span class="spacer" />
+                <button disabled={blocked}>Dispense and number the script</button>
+              </form>
+            : <p class="muted">A pharmacist dispenses this script. It stays under unfinished scripts until then.</p>}
+          <form method="post" action={`/dispensary/scripts/${s.id}/discard`} class="row"><span class="spacer" /><button class="danger">Discard this {s.repeatOf ? 'repeat' : 'script'}</button></form>
+        </div>}
           </div>
-          <aside>
+          <aside class="rxw-side">
             <PatientCard p={s.patient} flags={data.flags} balance={data.balance} />
             <div class="panel rx-side"><h3>Dates</h3>
               <dl class="rx-kv">
@@ -707,7 +761,6 @@ export function dispensaryRoutes() {
               </dl></div>
           </aside>
         </div>
-
         {draft && !s.repeatOf && <>
             <div class="touch-only panel" id="rx-touch">
               <div class="touchgrid">
@@ -733,54 +786,6 @@ export function dispensaryRoutes() {
                 </div>
               </div>
             </div>
-        </>}
-        <div class="wrap"><table>
-          <thead><tr><th>#</th><th>Item</th><th class="n">Qty</th><th class="n">Given</th><th>Directions</th><th class="n">Days</th><th class="n">Repeats</th><th>ICD-10</th><th class="n">Item</th><th class="n">Fee</th><th class="n">Total</th>{draft && <th />}</tr></thead>
-          <tbody>{s.lines.map((l) => (
-            <tr>
-              <td>{l.lineNo}</td>
-              <td><a href={`/items/${l.itemId}`}>{l.description}</a> <span class="muted">{l.stockCode}</span>
-                {l.schedule !== null && <span class="chip">S{l.schedule}</span>}{l.nappiCode && <span class="chip">NAPPI {l.nappiCode}</span>}{l.noClaim && <span class="chip">no claim</span>}
-                {draft && <div class="hint">{l.onHandUnits} units on hand{l.packSize > 1 ? `, pack of ${l.packSize}` : ''}</div>}</td>
-              <td class="n">{l.qtyUnits}</td>
-              <td class="n">{draft && s.repeatOf
-                ? <form method="post" action={`/dispensary/scripts/${s.id}/lines/${l.id}/supply`} class="row" style="justify-content:flex-end">
-                    <input name="supply" type="number" min="0" max={l.qtyUnits} value={l.supplyUnits} style="width:70px" /><button class="secondary">Set</button></form>
-                : l.supplyUnits}
-                {l.owedUnits > 0 && <div class="neg">{l.owedUnits} owed</div>}</td>
-              <td>{l.directions}</td><td class="n">{l.supplyDays}</td>
-              <td class="n">{s.repeatOf ? '' : l.repeats ? `${l.repeatsLeft ?? l.repeats} of ${l.repeats} left` : ''}</td>
-              <td>{l.icd10.join(', ')}</td>
-              <td class="n">{money(l.itemTotal)}</td><td class="n">{money(l.fee)}</td><td class="n">{money(l.lineTotal)}</td>
-              {draft && <td>{!s.repeatOf && <form method="post" action={`/dispensary/scripts/${s.id}/lines/${l.id}/delete`}><button class="secondary" title="Remove line">✕</button></form>}</td>}
-            </tr>
-          ))}</tbody>
-          <tfoot><tr><td colspan={8} /><td colspan={2}><b>Total incl VAT</b></td><td class="n"><b>{money(s.total)}</b></td>{draft && <td />}</tr>
-            <tr><td colspan={8} /><td colspan={2}>Medical aid</td><td class="n">{money(s.claimTotal)}</td>{draft && <td />}</tr>
-            <tr><td colspan={8} /><td colspan={2}>Patient pays</td><td class="n">{money(s.patientTotal)}</td>{draft && <td />}</tr></tfoot>
-        </table></div>
-
-        {draft && !s.repeatOf && <>
-          <p class="hint">Price = the item at the shop's price for the units prescribed{settings.dispensingFee ? `, plus a dispensing fee of ${money(settings.dispensingFee)} a line` : ''}. Medical aid pricing rules come with claims.</p>
-        </>}
-
-        {draft && <>
-          <h2>Check and dispense</h2>
-          {warnings.length > 0 && <div class="panel">{warnings.map((w) => (
-            <div class={w.level === 'block' ? 'neg' : w.level === 'info' ? 'muted' : ''} style="margin:2px 0">
-              {w.level === 'block' ? '⛔ ' : w.level === 'info' ? 'ℹ ' : '⚠ '}{w.lineNo ? `Line ${w.lineNo}: ` : ''}{w.text}</div>
-          ))}</div>}
-          {canDispense && (needsConfirm || needsStock) && !canOverride
-            ? <p class="muted">A pharmacist must dispense this script, because of the warnings above.</p>
-            : canDispense
-            ? <form method="post" action={`/dispensary/scripts/${s.id}/dispense`} class="panel row">
-                {needsConfirm && <label class="row" style="flex-direction:row"><input type="checkbox" name="confirmed" required /> I have checked the allergies and alerts above</label>}
-                {needsStock && <label class="row" style="flex-direction:row"><input type="checkbox" name="allowNegative" /> Stock count is wrong: dispense anyway</label>}
-                <span class="spacer" />
-                <button disabled={blocked}>Dispense and number the script</button>
-              </form>
-            : <p class="muted">A pharmacist dispenses this script. It stays under unfinished scripts until then.</p>}
-          <form method="post" action={`/dispensary/scripts/${s.id}/discard`} class="row"><span class="spacer" /><button class="danger">Discard this {s.repeatOf ? 'repeat' : 'script'}</button></form>
         </>}
 
         {!draft && <>
