@@ -392,3 +392,22 @@ export async function expandDirections(tx: Tx, typed: string): Promise<string> {
   const [d] = await tx`select text from directions where code = ${t.toUpperCase()}`
   return d ? (d.text as string) : t
 }
+
+export interface PatientPreview { lastScriptAt: Date | null; dependants: number; allergies: string[]; alerts: string[] }
+
+/** What the Find patient screen shows beside the highlighted patient: allergies, alerts, last script and family size. */
+export async function patientPreviews(tx: Tx, ids: string[]): Promise<Map<string, PatientPreview>> {
+  const out = new Map<string, PatientPreview>()
+  if (!ids.length) return out
+  const rows = await tx`
+    select p.id,
+           (select max(s.dispensed_at) from scripts s where s.patient_id = p.id and s.status = 'dispensed') as last_at,
+           (select count(*) from patients d where d.main_member_id = p.id and d.active)::int as deps,
+           coalesce((select array_agg(f.text order by f.created_at) from patient_flags f
+                      where f.patient_id = p.id and f.removed_at is null and f.kind = 'allergy'), '{}') as allergies,
+           coalesce((select array_agg(f.text order by f.created_at) from patient_flags f
+                      where f.patient_id = p.id and f.removed_at is null and f.kind = 'alert'), '{}') as alerts
+      from patients p where p.id in ${tx(ids)}`
+  for (const r of rows) out.set(r.id, { lastScriptAt: r.last_at, dependants: r.deps, allergies: r.allergies, alerts: r.alerts })
+  return out
+}
