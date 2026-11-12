@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import type { Sql } from '../src/db/index.js'
 import { createItem, getItem } from '../src/domain/items.js'
+import { addFlag, createPatient } from '../src/domain/patients.js'
 import { createApp } from '../src/web/app.js'
 import { appDb, newTenant, webLogin } from './helpers.js'
 
@@ -79,6 +80,22 @@ describe('web', () => {
     const html = await (await get('/dispensary/patients/new?surname=kgosi')).text()
     expect(html).toContain('value="KGOSI"')
     expect(html).not.toContain('name="inactive"')
+  })
+
+  it('finds a patient and shows their allergies beside the list, with a button that starts a script for today', async () => {
+    const { t, get, post } = await loggedIn()
+    const id = await t.as(async (tx) => {
+      const id = await createPatient(tx, { surname: 'SEGOPOLO', firstNames: 'Mpho', title: 'Ms', phone: '71234567' })
+      await addFlag(tx, id, { kind: 'allergy', text: 'SULPHA' })
+      return id
+    })
+    const html = await (await get('/dispensary?q=segop')).text()
+    expect(html).toContain(`data-id="${id}"`)
+    expect(html).toContain('Allergies: SULPHA')
+    const day = html.match(/name="rxDate" value="(\d{4}-\d{2}-\d{2})"/)?.[1]
+    expect(day).toBeTruthy()
+    const res = await post(`/dispensary/patients/${id}/scripts`, { rxDate: day! })
+    expect(res.headers.get('location')).toMatch(/^\/dispensary\/scripts\//)
   })
 
   it('lists items the shop carries before dormant catalogue items', async () => {

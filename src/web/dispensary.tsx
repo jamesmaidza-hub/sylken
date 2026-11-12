@@ -8,10 +8,10 @@ import { roleLabels } from '../security/roles.js'
 import { security } from '../security/config.js'
 import { findByCode, searchItems } from '../domain/items.js'
 import {
-  addFlag, ageOn, createPatient, familyOf, getDoctor, getPatient, listDirections, listDoctors, listMedicalAids, patientFlags, removeFlag,
+  addFlag, ageOn, createPatient, familyOf, getDoctor, getPatient, listDirections, listDoctors, listMedicalAids, patientFlags, patientPreviews, removeFlag,
   saveDirection, saveDoctor, saveMedicalAid, searchPatients, updatePatient, type Patient, type PatientInput,
 } from '../domain/patients.js'
-import { bounds } from '../domain/sales.js'
+import { bounds, shopToday } from '../domain/sales.js'
 import {
   addDays, addLine, cancelOwed, createDraft, discardDraft, dispenseScript, draftScripts, getScript, initials, labelsFor, listOwed, patientScripts,
   register, removeLine, amendScript, reverseScript, scriptBook, scriptIdByNo, scriptWarnings, setSupply, startRepeat, supplyOwed, updateDraft, type Label,
@@ -56,6 +56,30 @@ document.querySelectorAll('input[data-items]').forEach((inp) => {
 })`
 
 /** Keys on a draft script, the same ones RxWin uses, so staff keep their habits. */
+/** Find patient: search as you type, show the highlighted patient beside the list, Enter starts their script. */
+const findPatientJs = `(()=>{
+  const q=document.getElementById('fp-q'),f=document.getElementById('fp-form');if(!q)return;
+  const show=()=>{const s=document.querySelector('#fp-results tr.sel')||document.querySelector('#fp-results tr[data-id]');
+    document.querySelectorAll('.fp-card').forEach(c=>{c.hidden=!s||c.dataset.for!==s.dataset.id})};
+  show();
+  document.addEventListener('keyup',e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp')show()});
+  document.addEventListener('click',e=>{const r=e.target.closest('#fp-results tr[data-id]');if(!r||e.target.closest('a'))return;
+    e.preventDefault();e.stopImmediatePropagation();document.querySelectorAll('#fp-results tr.sel').forEach(x=>x.classList.remove('sel'));r.classList.add('sel');show()},true);
+  document.addEventListener('keydown',e=>{if(e.key!=='Enter'||e.defaultPrevented)return;const t=e.target;
+    if(t&&t!==q&&t.closest&&t.closest('input,select,textarea,button,a'))return;
+    const rows=document.querySelectorAll('#fp-results tr[data-id]');
+    const s=document.querySelector('#fp-results tr.sel')||(rows.length===1&&!document.querySelector('tr.sel')?rows[0]:null);if(!s)return;
+    if(t===q&&q.value.trim()!==(new URL(location.href).searchParams.get('q')||'').trim())return;
+    e.preventDefault();e.stopImmediatePropagation();const b=document.querySelector('.fp-card[data-for="'+s.dataset.id+'"] .fp-start');if(b)b.click()},true);
+  let timer,last=q.value;
+  q.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(async()=>{const v=q.value.trim();if(v===last)return;last=v;
+    const u=new URL(location.href);if(v)u.searchParams.set('q',v);else u.searchParams.delete('q');
+    const html=await (await fetch(u,{credentials:'same-origin'})).text();if(q.value.trim()!==v)return;
+    const d=new DOMParser().parseFromString(html,'text/html');
+    for(const id of ['fp-results','fp-cards'])document.getElementById(id).innerHTML=d.getElementById(id).innerHTML;
+    document.getElementById('fp-new').href=d.getElementById('fp-new').href;history.replaceState(null,'',u);show()},250)});
+})()`
+
 const scriptKeys = (patientId: string) => `
 (() => {
   const f = document.getElementById('add-line')
@@ -393,51 +417,90 @@ export function dispensaryRoutes() {
 
   r.get('/', async (c) => {
     const q = c.req.query('q') ?? ''
-    const { patients, drafts, owed, next } = await run(c, async (tx) => ({
-      patients: await searchPatients(tx, q, { limit: 50, mainMembersOnly: true }),
-      drafts: await draftScripts(tx),
-      owed: await listOwed(tx),
-      next: await nextScriptNo(tx),
-    }))
-    return page(c, 'Dispensary', (
-      <>
-        <RxToolbar on="find" />
-        <div class="row"><h1>Dispensary</h1><span class="spacer" />{owed.length > 0 && <a href="/dispensary/owed">{owed.length} owed item{owed.length === 1 ? '' : 's'} waiting</a>}
-          <form method="post" action="/dispensary/code/clear" class="row"><span class="muted">Dispenser <b>{getCookie(c, RX_COOKIE)}</b></span><button class="secondary">Change dispenser</button></form></div>
-        <form class="row panel">
-          <input name="q" data-search value={q} placeholder="Patient surname (and first name), ID, member number or phone  ( / )" style="flex:1" autofocus />
-          <button>Find</button>
-          <a class="btn secondary" href={`/dispensary/patients/new${q && !/\d/.test(q) ? `?surname=${encodeURIComponent(q)}` : ''}`}>New patient</a>
-        </form>
-        <form class="row" action="/dispensary/scripts" style="margin-bottom:12px">
-          <input name="no" inputmode="numeric" placeholder="Script number" style="width:160px" />
-          <button class="secondary">Open script</button>
-          <span class="hint">The next script dispensed will be number {next}.</span>
-        </form>
-        {q && (
-          <div class="wrap"><table>
-            <thead><tr><th>Patient</th><th>ID</th><th>Born</th><th>Medical aid</th><th>Member</th><th>Phone</th></tr></thead>
-            <tbody>{patients.map((p) => (
-              <tr data-href={`/dispensary/patients/${p.id}`}>
-                <td><a href={`/dispensary/patients/${p.id}`}>{p.name}</a>{p.mainMemberName && <span class="muted"> · dep. of {p.mainMemberName}</span>}</td>
-                <td>{p.idNo}</td><td>{p.dateOfBirth ? date(p.dateOfBirth) : ''}</td><td>{p.medicalAidName ?? <span class="muted">private</span>}</td>
-                <td>{p.memberNo}{p.dependantCode ? ` / ${p.dependantCode}` : ''}</td><td>{p.phone}</td></tr>
-            ))}</tbody>
-          </table></div>
-        )}
-        {q && !patients.length && <p class="muted">No patient matches "{q}". Check the spelling, or add them as a new patient.</p>}
-        <h2>Unfinished scripts</h2>
-        {drafts.length
-          ? <div class="wrap"><table>
-              <thead><tr><th>Started</th><th>Patient</th><th class="n">Lines</th><th>By</th></tr></thead>
-              <tbody>{drafts.map((d) => (
-                <tr data-href={`/dispensary/scripts/${d.id}`}><td>{dateTime(d.createdAt)}</td>
-                  <td><a href={`/dispensary/scripts/${d.id}`}>{d.patientName}</a>{d.repeat && <span class="chip">repeat</span>}</td>
-                  <td class="n">{d.lines}</td><td>{d.by}</td></tr>
-              ))}</tbody>
-            </table></div>
-          : <p class="muted">None. Scripts stay here until they are dispensed or discarded.</p>}
-      </>
+    const { patients, previews, drafts, owed, next, today } = await run(c, async (tx) => {
+      const patients = await searchPatients(tx, q, { limit: 50, mainMembersOnly: true })
+      return {
+        patients, today: shopToday((await getSettings(tx)).timezone), previews: await patientPreviews(tx, patients.map((p) => p.id)),
+        drafts: await draftScripts(tx), owed: await listOwed(tx), next: await nextScriptNo(tx),
+      }
+    })
+    return page(c, 'Find patient', (
+      <div class="fp">
+        <div class="fp-main">
+          <section class="panel fp-search">
+            <div class="rxw-title"><h1>Find patient</h1><span class="spacer" />
+              {owed.length > 0 && <a href="/dispensary/owed">{owed.length} owed item{owed.length === 1 ? '' : 's'} waiting</a>}
+              <form method="post" action="/dispensary/code/clear" class="row"><span class="muted">Dispenser <b>{getCookie(c, RX_COOKIE)}</b></span><button class="secondary">Change dispenser</button></form>
+            </div>
+            <form class="fp-find" id="fp-form">
+              <label class="rxw-f grow"><span>Surname (and first name), ID, member number or phone <kbd>/</kbd></span>
+                <input name="q" id="fp-q" data-search value={q} autocomplete="off" autofocus /></label>
+              <button>Find</button>
+              <a class="btn secondary" id="fp-new" href={`/dispensary/patients/new${q && !/\d/.test(q) ? `?surname=${encodeURIComponent(q)}` : ''}`}>New patient</a>
+            </form>
+          </section>
+          <section class="panel rxw-lines" id="fp-results">
+            {q ? (patients.length ? (
+              <table>
+                <thead><tr><th>Surname</th><th>First names</th><th>Title</th><th>ID</th><th>Born</th><th>Medical aid</th><th>Member no.</th><th>Phone</th></tr></thead>
+                <tbody>{patients.map((p) => (
+                  <tr data-href={`/dispensary/patients/${p.id}`} data-id={p.id}>
+                    <td><a href={`/dispensary/patients/${p.id}`}>{p.surname}</a></td><td>{p.firstNames}</td><td>{p.title}</td>
+                    <td>{p.idNo}</td><td>{p.dateOfBirth ? date(p.dateOfBirth) : ''}</td><td>{p.medicalAidName ?? <span class="muted">Private</span>}</td>
+                    <td>{p.memberNo}{p.dependantCode ? ` / ${p.dependantCode}` : ''}</td><td>{p.phone}</td></tr>
+                ))}</tbody>
+              </table>
+            ) : <p class="empty">No patient matches "{q}". Check the spelling, or press New patient to add them.</p>)
+              : <p class="empty">Type a surname, ID, member number or phone number. Use <kbd>↑</kbd> <kbd>↓</kbd> to pick a patient and <kbd>Enter</kbd> to start their script.</p>}
+          </section>
+          <section class="panel rxw-lines">
+            <h2 class="fp-h">Unfinished and parked scripts
+              <form class="row" action="/dispensary/scripts"><input name="no" inputmode="numeric" placeholder="Script number" style="width:140px" />
+                <button class="secondary">Open script</button><span class="hint">Next number: {next}</span></form></h2>
+            {drafts.length
+              ? <table>
+                  <thead><tr><th>Started</th><th>Patient</th><th class="n">Lines</th><th>By</th></tr></thead>
+                  <tbody>{drafts.map((d) => (
+                    <tr data-href={`/dispensary/scripts/${d.id}`}><td>{dateTime(d.createdAt)}</td>
+                      <td><a href={`/dispensary/scripts/${d.id}`}>{d.patientName}</a>{d.repeat && <span class="chip">repeat</span>}</td>
+                      <td class="n">{d.lines}</td><td>{d.by}</td></tr>
+                  ))}</tbody>
+                </table>
+              : <p class="empty">None. Scripts stay here until they are dispensed or discarded.</p>}
+          </section>
+        </div>
+        <aside class="rxw-side" id="fp-cards">
+          {patients.map((p) => {
+            const v = previews.get(p.id)
+            const age = ageOn(p.dateOfBirth)
+            return (
+              <section class="panel fp-card" data-for={p.id} hidden>
+                <h3>Patient information</h3>
+                <b class="fp-name">{p.name}</b>
+                <dl class="fp-dl">
+                  <dt>ID</dt><dd>{p.idNo ?? '–'}</dd>
+                  <dt>Born</dt><dd>{p.dateOfBirth ? `${date(p.dateOfBirth)}${age !== null ? ` (${age})` : ''}` : '–'}</dd>
+                  <dt>Phone</dt><dd>{p.phone ?? '–'}</dd>
+                  {p.address && <><dt>Address</dt><dd>{p.address}</dd></>}
+                  <dt>Medical aid</dt><dd>{p.medicalAidName ? `${p.medicalAidName} ${p.memberNo ?? ''}` : 'Private'}</dd>
+                  {p.doctorName && <><dt>Doctor</dt><dd>{p.doctorName}</dd></>}
+                  <dt>Dependants</dt><dd>{v?.dependants || 'none'}</dd>
+                  <dt>Last script</dt><dd>{v?.lastScriptAt ? date(v.lastScriptAt) : 'none yet'}</dd>
+                </dl>
+                {v?.allergies.length ? <p class="fp-allergy">Allergies: {v.allergies.join(', ')}</p> : <p class="hint">No allergies on file</p>}
+                {v?.alerts.length ? <p class="fp-alert">{v.alerts.join(' · ')}</p> : null}
+                <form method="post" action={`/dispensary/patients/${p.id}/scripts`} class="fp-go">
+                  <input type="hidden" name="rxDate" value={today} />
+                  {p.doctorId && <input type="hidden" name="doctorId" value={p.doctorId} />}
+                  <button class="fp-start">New script <kbd>Enter</kbd></button>
+                </form>
+                <a class="btn secondary" href={`/dispensary/patients/${p.id}`}>Patient details and history</a>
+              </section>
+            )
+          })}
+        </aside>
+        {raw(`<script>${findPatientJs}</script>`)}
+      </div>
     ))
   })
 

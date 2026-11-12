@@ -403,6 +403,16 @@ button kbd,.btn kbd{background:rgba(255,255,255,.22);border-color:transparent;co
 .fbar kbd{display:inline-block;margin-right:5px;border:1px solid #b9bfc7;background:#fff;padding:0 4px;border-radius:3px;color:#222;font:600 11px ui-monospace,monospace}
 body.framed .fbar{background:#f0f0f0;border-top-color:#b9bfc7;padding:5px 14px;font-size:13px;color:#333}
 @media (max-width:980px){.rxw{grid-template-columns:1fr}.rxw-side{position:static}}
+.fp{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;align-items:start;padding-bottom:56px}.fp-main{min-width:0}
+.fp-find{display:flex;gap:10px;align-items:flex-end;margin-top:10px}.fp-find input{font-size:17px;padding:8px 10px}
+.fp-h{display:flex;flex-wrap:wrap;align-items:center;gap:8px 16px;margin:0;padding:10px 12px;font-size:15px}.fp-h form{margin:0 0 0 auto}
+#fp-results .empty,.fp .rxw-lines .empty{padding:14px 12px;margin:0}.fp-h form button{font-weight:400}.fp-h .hint{font-weight:400}
+.fp-card h3{margin:0 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}.fp-name{font-size:17px}
+.fp-dl{display:grid;grid-template-columns:96px 1fr;gap:5px 8px;margin:10px 0}.fp-dl dt{color:var(--muted)}.fp-dl dd{margin:0}
+.fp-allergy{color:var(--bad);font-weight:700;margin:8px 0}.fp-alert{color:#9a5b00;font-weight:600;margin:6px 0}
+.fp-go{margin:10px 0 8px}.fp-go button,.fp-card>.btn{width:100%;text-align:center;display:block}
+@media (max-width:980px){.fp{grid-template-columns:1fr}}
+
 @media (max-width:640px){.rx-l{width:100%}.rx-info{margin-left:0}}
 /* Touch screen layout: bigger rows, fields and buttons; screens may add big-button panels (.touch-only). */
 .toolbar{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
