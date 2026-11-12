@@ -388,6 +388,21 @@ details.bin-group{margin:6px 0;border:1px solid var(--line);border-radius:8px;ba
   body{background:#fff;color:#000;font-size:12px}main{max-width:none;padding:0}table{background:#fff}th,td{padding:3px 6px;border-bottom:1px solid #999}
   td.counted,th.counted{width:90px;border-left:1px solid #999}.bin-group{break-inside:auto;border:0}details.bin-group>summary{padding:8px 0 4px;font-size:14px}details.bin-group>summary::before{content:none!important}.bin-group h2{break-after:avoid;font-size:14px}tr{break-inside:avoid}a{color:#000;text-decoration:none}.wrap{overflow:visible}}
 @media (max-width:980px){.rx-desk{grid-template-columns:1fr}}
+/* Script window (RxWin order): header fields, the line grid, the entry row under it, check and dispense; patient and money on the right. */
+.rxw{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:12px;align-items:start}.rxw-main{min-width:0}
+.rxw-title{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.rxw-title h1{margin:0}.rxw-title form{margin:0}
+.rxw-fields{display:flex;flex-wrap:wrap;gap:10px 18px;margin-top:10px;align-items:flex-end}.rxw-headform{display:contents}
+.rxw-f{display:flex;flex-direction:column;gap:3px;min-width:0}.rxw-f>span{font-size:12px;color:var(--muted);font-weight:600}.rxw-f>span kbd{font-size:10px}
+.rxw-f #rx-doctor{min-width:200px}.rxw-fields .rxw-f{white-space:nowrap}.rxw-f.grow{flex:1;min-width:240px}.rxw-f .grow{flex:1;min-width:0}
+.rxw-lines{padding:0;overflow:hidden}.rxw-lines table{background:none}.rxw-lines thead th{background:color-mix(in srgb,var(--mod,var(--accent)) 8%,var(--panel))}
+.rxw-row{display:flex;flex-wrap:wrap;gap:10px 14px;align-items:flex-end;margin-bottom:8px}.rxw-acts{align-items:center;margin:4px 0 0}
+.rxw-form input,.rxw-form select{font-size:16px;padding:7px 9px}.rxw-form .num{width:84px}.rxw-form .rx-info{margin:0 0 8px;min-height:1.3em}
+.rxw-form .rx-instr{min-height:38px;padding:7px 10px;font-size:16px}
+.rxw-disp h2{margin:0 0 8px}.rxw-side{position:sticky;top:150px}.rxw{padding-bottom:56px}.rxw-lines th{white-space:nowrap}
+button kbd,.btn kbd{background:rgba(255,255,255,.22);border-color:transparent;color:inherit;margin:0 0 0 6px}.secondary kbd{background:var(--panel);border-color:var(--line)}
+.fbar kbd{display:inline-block;margin-right:5px;border:1px solid #b9bfc7;background:#fff;padding:0 4px;border-radius:3px;color:#222;font:600 11px ui-monospace,monospace}
+body.framed .fbar{background:#f0f0f0;border-top-color:#b9bfc7;padding:5px 14px;font-size:13px;color:#333}
+@media (max-width:980px){.rxw{grid-template-columns:1fr}.rxw-side{position:static}}
 @media (max-width:640px){.rx-l{width:100%}.rx-info{margin-left:0}}
 /* Touch screen layout: bigger rows, fields and buttons; screens may add big-button panels (.touch-only). */
 .toolbar{display:flex;gap:6px;flex-wrap:wrap;margin:0 0 12px}
