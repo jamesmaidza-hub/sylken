@@ -93,13 +93,13 @@ describe('1.4 counter assistants', () => {
   })
 
   it('does not see dispensary links in the menu', async () => {
-    const home = await (await p.assistant.get('/')).text()
-    expect(home).not.toContain('/menu/dispensary')
-    expect(home).toContain('/menu/sales')
-    const sales = await (await p.assistant.get('/menu/sales')).text()
-    expect(sales).toContain('href="/till/"')
-    expect(sales).not.toContain('href="/dispensary"')
-    expect((await p.assistant.get('/menu/dispensary')).status).toBe(404)
+    const home = await (await p.assistant.get('/')).text()                // a cashier lands on the Till module
+    expect(home).toContain('sylken Till')
+    expect(home).not.toContain('/m/rx')
+    expect(home).not.toContain('href="/dispensary"')
+    expect(home).toContain('href="/till/"')
+    expect((await p.assistant.get('/m/rx')).status).toBe(404)
+    expect((await p.assistant.get('/menu/dispensary')).headers.get('location')).toBe('/m/rx')   // which is a 404 for a cashier
   })
 })
 

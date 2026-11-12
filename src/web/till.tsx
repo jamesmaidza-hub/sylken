@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { Hono } from 'hono'
 import { raw } from 'hono/html'
 import type { Ctx, Env } from './app.js'
+import { frameCss, Icon, menus, MenuBar, modulePath, modulesFor, type IconName } from './layout.js'
 
 /**
  * The till screen. It is a small browser app, not a server-rendered page: it keeps the item
@@ -37,6 +38,8 @@ export function tillRoutes() {
 
 function tillPage(c: Ctx) {
   const u = c.get('user')
+  const mods = modulesFor(u)
+  const mod = mods.find((m) => m.slug === 'till')
   const boot = JSON.stringify({ tenantId: u.tenantId, tenantName: u.tenantName, user: { id: u.userId, name: u.name, roles: u.roles } })
   return c.html(
     <html lang="en">
@@ -45,25 +48,36 @@ function tillPage(c: Ctx) {
         <meta name="viewport" content="width=device-width, initial-scale=1" />
         <title>Till · sylken</title>
         <style>{raw(css)}</style>
+        <style>{raw(frameCss + tillFrameCss)}</style>
       </head>
-      <body>
+      <body class="framed" style={`--mod:${mod?.color ?? '#0f7a5f'}`}>
         <div id="app">
-          <header>
-            <a class="brand" href="/" title="Back office">sylken</a>
-            <span id="till-label">Till</span>
-            <span id="run-label" class="muted"></span>
-            <label class="cashier-code" title="Type your 2-letter staff code before each sale"><span>Cashier code</span>
-              <input id="cashier-code" maxlength={2} autocomplete="off" autocapitalize="characters" spellcheck={false} placeholder="XX" /></label>
-            <span id="cashier" class="muted"></span>
-            <span class="spacer"></span>
-            <a class="nav" href="/items" title="Items and stock on hand (F2 in the back office)">Stock</a>
-            <a class="nav" href="/dispensary">Dispensary</a>
-            <a class="nav" href="/" title="Receiving, min/max ordering, reports, cash-up">Back office</a>
-            <span id="net" class="net">…</span>
-            <span id="pending" class="muted"></span>
-            <button id="cash-alert" type="button" class="cash-alert" hidden title="The drawer holds more cash than the shop's limit. Press F7 to record a cash drop.">⚠ Cash drop due</button>
-            <button id="touch-toggle" type="button" class="secondary small" title="Switch between the keyboard layout and big buttons for a touch screen">Touch screen</button>
-          </header>
+          <div class="frame">
+            <div class="titlebar">
+              <a class="brand" href={modulePath('till')} title="The Till module">sylken Till · Invoicing</a>
+              <span class="shop">{u.tenantName}</span>
+              <span id="till-label">Till</span>
+              <span id="run-label"></span>
+              <label class="cashier-code" title="Type your 2-letter staff code before each sale"><span>Cashier code</span>
+                <input id="cashier-code" maxlength={2} autocomplete="off" autocapitalize="characters" spellcheck={false} placeholder="XX" /></label>
+              <span id="cashier"></span>
+              <span class="spacer"></span>
+              <span id="net" class="net">…</span>
+              <span id="pending"></span>
+              <button id="cash-alert" type="button" class="cash-alert" hidden title="The drawer holds more cash than the shop's limit. Press F7 to record a cash drop.">⚠ Cash drop due</button>
+              <button id="touch-toggle" type="button" class="tb-btn" title="Switch between the keyboard layout and big buttons for a touch screen">Touch screen</button>
+              <a class="tb-btn" href="/logout">Log out</a>
+            </div>
+            {mod && <MenuBar mod={mod} />}
+            <div class="toolstrip">
+              <nav class="tools" aria-label="Till keys">{tillTools.map(([icon, label, key], n) => (
+                <button type="button" class={`tool${n === 0 ? ' main' : ''}`} data-key={key}><Icon name={icon} /><span>{label}</span><kbd>{key}</kbd></button>
+              ))}</nav>
+              <nav class="switch" aria-label="Other modules">{mods.filter((m) => m.slug !== 'till').map((m) => (
+                <a href={modulePath(m.slug)} style={`--c:${m.color}`}><i />{m.name}</a>
+              ))}<a href={modulePath('till')} style={`--c:${mod?.color ?? '#0f7a5f'}`}><i />Till module</a></nav>
+            </div>
+          </div>
           <div id="banner" class="banner" hidden></div>
           <main>
             <section class="left">
@@ -124,7 +138,29 @@ function tillPage(c: Ctx) {
         <div id="slip" class="slip"></div>
         <script>{raw(`window.SYLKEN=${boot.replace(/</g, '\\u003c')}`)}</script>
         <script src="/till/app.js"></script>
+        <script>{raw(menus + toolKeys)}</script>
       </body>
     </html>,
   )
 }
+
+/** The till's own toolbar: each button does what its F-key does. */
+const tillTools: [IconName, string, string][] = [
+  ['cash', 'Pay', 'F5'], ['rx', 'Script', 'F2'], ['plus', 'Quantity', 'F4'], ['tag', 'Price', 'F6'], ['undo', 'Refund', 'F8'],
+  ['drawer', 'Petty cash', 'F9'], ['acct', 'Account', 'F10'], ['print', 'Reprint', 'F12'], ['lock', 'No sale', 'F3'], ['box', 'Cash drop', 'F7'],
+]
+
+const toolKeys = `
+document.querySelectorAll('.tools [data-key]').forEach(b=>b.addEventListener('click',()=>{
+  document.dispatchEvent(new KeyboardEvent('keydown',{key:b.dataset.key,bubbles:true,cancelable:true}))}))`
+
+// The till keeps its own layout under the frame; the key list moves into the toolbar.
+const tillFrameCss = `
+#app>.frame .titlebar{flex-wrap:nowrap;white-space:nowrap}
+#app>.frame .cashier-code{display:flex;align-items:center;gap:6px;font-weight:600}
+#app>.frame .cashier-code input{width:56px;padding:2px 6px;text-align:center;text-transform:uppercase;letter-spacing:2px;font-weight:700;border:1px solid #fff;border-radius:3px;color:#111;background:#fff}
+#app>.frame .net{background:rgba(255,255,255,.18);color:#fff}#app>.frame .net.off{background:#b42318}
+#app>.frame #run-label,#app>.frame #cashier,#app>.frame #pending{opacity:.85}
+button.tool{background:none;font:inherit;font-size:12.5px;font-weight:600;cursor:pointer}
+body:not(.touch-mode) dl.keys{display:none}
+`

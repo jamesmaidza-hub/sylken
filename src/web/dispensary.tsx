@@ -203,9 +203,9 @@ export function RxToolbar({ on, patientId }: { on?: string; patientId?: string }
   // Find patient, New patient, Owed items, Script book, Register and Doctors are in the Dispensary menu at the top.
   const tools: [string, string, string, string][] = [
     ...(patientId ? [['history', '📋', 'History', `/dispensary/patients/${patientId}#scripts`] as [string, string, string, string]] : []),
-    ['reports', '📊', 'Reports', '/reports/rx'],
-    ['settings', '⚙️', 'Settings', '/dispensary/settings'],
+    // Reports and Settings are in the Dispensary module's toolbar and menus.
   ]
+  if (!tools.length) return null
   return (
     <nav class="toolbar">{tools.map(([k, icon, label, href]) => (
       <a href={href} class={k === on ? 'on' : ''}><span class="ico" aria-hidden="true">{icon}</span>{label}</a>
