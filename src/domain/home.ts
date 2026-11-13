@@ -119,10 +119,12 @@ export async function salesHome(tx: Tx) {
       from sales x left join users u on u.id = x.user_id left join scripts s on s.id = x.script_id
      where x.occurred_at >= ${t.start} and x.occurred_at < ${t.end}
      order by x.occurred_at desc limit 40`
+  const runs = await tx`select t.code, t.name, r.run_no from till_runs r join tills t on t.id = r.till_id where r.status = 'open' order by t.code`
+  const openRunList = runs.map((x) => `${x.name || x.code} · run ${x.run_no}`)
   const sales: SaleRow[] = rows.map((x) => ({ id: x.id, saleNo: x.sale_no, at: x.occurred_at, kind: x.kind, total: num(x.total), who: x.name, scriptNo: x.script_no }))
   return {
     salesToday: num(c.total), gpToday: num(c.gp), salesCount: c.n as number,
-    openRuns: r.open_runs as number, overLimit: r.over_limit as number, scriptsUnpaid: r.scripts_unpaid as number, sales,
+    openRuns: r.open_runs as number, openRunList, overLimit: r.over_limit as number, scriptsUnpaid: r.scripts_unpaid as number, sales,
   }
 }
 

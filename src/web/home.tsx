@@ -1,7 +1,46 @@
+import { readFileSync } from 'node:fs'
+import { raw } from 'hono/html'
 import type { Ctx } from './app.js'
 import { can, page, run } from './app.js'
 import { dispensaryHome, recentAudit, salesHome, stockHome } from '../domain/home.js'
+import { shopToday } from '../domain/sales.js'
+import { getSettings } from '../domain/settings.js'
+import { roleLabels } from '../security/roles.js'
 import { dateTime, homeModule, modulesFor, money, qty, type Module } from './layout.js'
+
+const version = (() => {
+  try { return JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version as string } catch { return '' }
+})()
+
+const taglines: Record<string, string> = { rx: 'Scripts, patients and claims', till: 'Point of sale and cash-up', stock: 'Items, orders and stock control' }
+
+/** A module's home window: the sylken banner, the counts and list, a System information panel, and the shop's name along the bottom. */
+async function ModuleHome({ c, mod, extra, children }: { c: Ctx; mod: Module; extra?: [string, string | number][]; children?: any }) {
+  const user = c.get('user')
+  const day = await run(c, async (tx) => shopToday((await getSettings(tx)).timezone))
+  const rows: [string, string | number][] = [
+    ['Module', mod.name], ['User', user.name], ['Role', user.roles.map((r) => roleLabels[r]).join(', ')],
+    ['Trading period', day.slice(0, 7).replace('-', '')], ...(extra ?? []), ['Version', version || '–'],
+  ]
+  return (
+    <div class="mh">
+      <div class="mh-body">
+        <div class="mh-main">
+          <div class="mh-banner"><b>sylken</b><span>{mod.name}</span><small>{taglines[mod.slug] ?? ''}</small></div>
+          {children}
+        </div>
+        <aside class="mh-info">
+          <h3>System information</h3>
+          <dl>{rows.map(([k, v]) => <><dt>{k}</dt><dd>{v}</dd></>)}
+            <dt>System date and time</dt><dd id="mh-clock">{new Date().toLocaleString('en-GB', { timeZone: 'Africa/Gaborone' })}</dd></dl>
+          <p class="mh-pow">sylken pharmacy software</p>
+        </aside>
+      </div>
+      <div class="mh-band">{user.tenantName}</div>
+      {raw(`<script>(()=>{const e=document.getElementById('mh-clock');const f=()=>{e.textContent=new Date().toLocaleString('en-GB',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})};f();setInterval(f,1000)})()</script>`)}
+    </div>
+  )
+}
 
 /** A count at the top of a module's home page; a link when there is a list behind it. */
 function Count({ label, value, tone, href }: { label: string; value: string | number; tone?: 'red' | 'amb' | 'grn'; href?: string }) {
@@ -16,7 +55,7 @@ const stateLabel = { draft: ['Draft', 'red'], unpaid: ['Not paid', 'amb'], owed:
 async function rxPage(c: Ctx, mod: Module) {
   const h = await run(c, (tx) => dispensaryHome(tx))
   return page(c, mod.name, (
-    <>
+    <ModuleHome c={c} mod={mod}>
       <div class="mod-counts">
         <Count label="Drafts to check" value={h.drafts} tone={h.drafts ? 'red' : 'grn'} href="#scripts" />
         <Count label="Owed to patients" value={h.owed} tone={h.owed ? 'amb' : 'grn'} href="/dispensary/owed" />
@@ -38,7 +77,7 @@ async function rxPage(c: Ctx, mod: Module) {
           </table></div>
         ) : <p class="empty">No drafts and no scripts dispensed today. Press <kbd>F5</kbd> or New script to start one.</p>}
       </section>
-    </>
+    </ModuleHome>
   ))
 }
 
@@ -46,7 +85,7 @@ async function stockPage(c: Ctx, mod: Module) {
   const h = await run(c, (tx) => stockHome(tx))
   const reports = can(c, 'stock.reports')
   return page(c, mod.name, (
-    <>
+    <ModuleHome c={c} mod={mod}>
       <div class="mod-counts">
         <Count label="Selling but out of stock" value={h.outSelling} tone={h.outSelling ? 'red' : 'grn'} href="#order" />
         <Count label="At or below minimum" value={h.belowMin} tone={h.belowMin ? 'amb' : 'grn'} href={reports ? '/reports/minmax' : undefined} />
@@ -68,7 +107,7 @@ async function stockPage(c: Ctx, mod: Module) {
           </table></div>
         ) : <p class="empty">Nothing that sells is out of stock or below its minimum.</p>}
       </section>
-    </>
+    </ModuleHome>
   ))
 }
 
@@ -77,7 +116,7 @@ async function tillPage(c: Ctx, mod: Module) {
   const h = await run(c, (tx) => salesHome(tx))
   const audit = can(c, 'audit.view') ? await run(c, (tx) => recentAudit(tx, 12)) : []
   return page(c, mod.name, (
-    <>
+    <ModuleHome c={c} mod={mod} extra={[['Open till runs', h.openRunList.join(', ') || 'none']]}>
       <div class="mod-counts">
         {sales
           ? <Count label={`Sales today (${h.salesCount})`} value={money(h.salesToday)} href="/sales" />
@@ -109,7 +148,7 @@ async function tillPage(c: Ctx, mod: Module) {
           </table></div>
         </section>
       )}
-    </>
+    </ModuleHome>
   ))
 }
 
